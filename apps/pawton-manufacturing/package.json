@@ -11,7 +11,7 @@
     "start": "node ./dist/server/entry.mjs"
   },
   "dependencies": {
-    "@astrojs/node": "^9.0.0",
+    "@astrojs/node": "^11.0.2",
     "@azure/identity": "^4.13.3",
     "@azure/keyvault-secrets": "^4.11.2",
     "@azure/monitor-query-logs": "^1.0.0",
