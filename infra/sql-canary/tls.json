@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.47.16.16243",
+      "templateHash": "11364995100604617021"
+    }
+  },
+  "parameters": {
+    "canaryAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing dedicated canary app created by main.bicep."
+      }
+    },
+    "certificateName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the uploaded publicly trusted wildcard certificate resource in this resource group, covering *.canary.ninjapaws.org. Do not pass a PFX or private key."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/sites/hostNameBindings",
+      "apiVersion": "2025-03-01",
+      "name": "[format('{0}/{1}', parameters('canaryAppName'), '*.canary.ninjapaws.org')]",
+      "properties": {
+        "siteName": "[parameters('canaryAppName')]",
+        "hostNameType": "Verified",
+        "customHostNameDnsRecordType": "CName",
+        "sslState": "SniEnabled",
+        "thumbprint": "[reference(resourceId('Microsoft.Web/certificates', parameters('certificateName')), '2025-03-01').thumbprint]"
+      }
+    }
+  ],
+  "outputs": {
+    "boundHostname": {
+      "type": "string",
+      "value": "*.canary.ninjapaws.org"
+    },
+    "boundThumbprint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/certificates', parameters('certificateName')), '2025-03-01').thumbprint]"
+    }
+  }
+}

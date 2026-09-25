@@ -1,0 +1,135 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.47.16.16243",
+      "templateHash": "12592739743343952603"
+    }
+  },
+  "parameters": {
+    "canaryAppName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Name of the new dedicated canary app. Never use the Pawton portal app name."
+      }
+    },
+    "appServicePlanName": {
+      "type": "string",
+      "metadata": {
+        "description": "Existing Linux Basic-or-higher App Service plan in this resource group. Its compute capacity is shared, not recreated."
+      }
+    },
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Location of the existing App Service plan."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2025-03-01",
+      "name": "[parameters('canaryAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "app,linux",
+      "tags": {
+        "purpose": "dojo-inert-canary"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+        "httpsOnly": true,
+        "publicNetworkAccess": "Enabled",
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "NODE|24-lts",
+          "appCommandLine": "node scripts/serve-external-source-canary.mjs",
+          "alwaysOn": true,
+          "ftpsState": "Disabled",
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "http20Enabled": true,
+          "remoteDebuggingEnabled": false,
+          "appSettings": [
+            {
+              "name": "HOST",
+              "value": "0.0.0.0"
+            },
+            {
+              "name": "PORT",
+              "value": "8080"
+            },
+            {
+              "name": "WEBSITES_PORT",
+              "value": "8080"
+            },
+            {
+              "name": "WEBSITE_NODE_DEFAULT_VERSION",
+              "value": "~24"
+            },
+            {
+              "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+              "value": "false"
+            },
+            {
+              "name": "ENABLE_ORYX_BUILD",
+              "value": "false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2025-03-01",
+      "name": "[format('{0}/{1}', parameters('canaryAppName'), 'ftp')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('canaryAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2025-03-01",
+      "name": "[format('{0}/{1}', parameters('canaryAppName'), 'scm')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('canaryAppName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "canaryAppResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/sites', parameters('canaryAppName'))]"
+    },
+    "canaryDefaultHostname": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('canaryAppName')), '2025-03-01').defaultHostName]"
+    },
+    "cloudflareRecords": {
+      "type": "array",
+      "value": [
+        {
+          "type": "CNAME",
+          "name": "*.canary",
+          "content": "[reference(resourceId('Microsoft.Web/sites', parameters('canaryAppName')), '2025-03-01').defaultHostName]",
+          "proxy": "DNS only"
+        },
+        {
+          "type": "TXT",
+          "name": "asuid.canary",
+          "content": "[reference(resourceId('Microsoft.Web/sites', parameters('canaryAppName')), '2025-03-01').customDomainVerificationId]"
+        }
+      ]
+    }
+  }
+}

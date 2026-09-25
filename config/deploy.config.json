@@ -1,0 +1,86 @@
+{
+  "configVersion": "1.0.0",
+  "project": {
+    "name": "Pawton",
+    "author": "Dr Bill Mcilhargey",
+    "organization": "Ninja Paw",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Dr Bill Mcilhargey / Ninja Paw",
+    "repository": "https://github.com/ninjapaw/pawton",
+    "support": "https://github.com/ninjapaw/pawton/issues",
+    "disclaimer": "This project provisions an INTENTIONALLY VULNERABLE training environment. Deploy only to an isolated subscription you control. Provided as-is, without warranty of any kind. USE AT YOUR OWN RISK."
+  },
+  "defaults": {
+    "scenario": "defender-sql-scenario-2",
+    "scenarioIds": "defender-sql-scenario-2",
+    "location": "centralus"
+  },
+  "scenarios": {
+    "defender-sql-scenario-2": {
+      "name": "Defender for Cloud: SQL Server on Azure VM Protection",
+      "shortName": "SQL Server on Azure VM Protection",
+      "cve": "N/A",
+      "advisoryUrl": "https://learn.microsoft.com/azure/defender-for-cloud/defender-for-sql-introduction",
+      "affectedVersion": "unhardened baseline",
+      "fixedVersion": "Defender for Servers Plan 2 + Defender for SQL hardened baseline",
+      "workloads": "Azure VM, SQL Server 2022, Azure Bastion, Defender for Servers Plan 2 (Defender for Endpoint), Defender for SQL, Microsoft Sentinel",
+      "deployScript": "scripts/deploy.sh",
+      "infraPath": "infra/sql-defender-scenario/main.bicep",
+      "sampleDatabase": {
+        "name": "Futon Manufacturing",
+        "source": "https://github.com/microsoft/sql-server-samples/tree/master/samples/databases/futon-manufacturing"
+      }
+    }
+  },
+  "sqlScenario": {
+    "vmSize": "Standard_D4s_v4",
+    "sqlImageSku": "sqldev-gen2",
+    "deployBastion": "true",
+    "autoAllowBastionRdp": "true",
+    "allowPublicSqlAccess": "false",
+    "allowPublicKeyVaultAccess": "true",
+    "deployWebApp": "true",
+    "enableSqlDemoActions": "true",
+    "enableSqlShellAttackTests": "true",
+    "sqlAttackCooldownSeconds": "15",
+    "portalTimeZone": "America/New_York",
+    "webAppPlanSku": "B1",
+    "webAppCustomDomain": "",
+    "manageCustomDomain": "false",
+    "cloudflareZoneId": "",
+    "adminPortalUsername": "dojo-admin",
+    "userPortalUsername": "dojo-manager",
+    "workspaceRetentionDays": "30",
+    "sentinelMode": "new",
+    "sentinelResourceGroup": "",
+    "sentinelWorkspaceName": "",
+    "centralWorkspaceResourceGroup": "NP-Sentinel-CentralUS",
+    "centralWorkspaceName": "log-np-sentinel-centralus",
+    "defender": {
+      "serversPlan": "VirtualMachines",
+      "serversSubPlan": "P2",
+      "sqlPlan": "SqlServerVirtualMachines"
+    }
+  },
+  "environments": {
+    "dev": {
+      "branch": "dev",
+      "location": "centralus",
+      "sqlResourceGroup": "NP-ninjapaws-dojo-sql-Dev-CentralUS",
+      "sqlVmName": "ninjapaws-sql-vm-dev",
+      "allowPublicSqlAccess": "true",
+      "allowPublicKeyVaultAccess": "true",
+      "webAppName": "ninjapaws-pawton-dev",
+      "webAppCustomDomain": "pawton.ninjapaws.org"
+    },
+    "prod": {
+      "branch": "main",
+      "location": "centralus",
+      "sqlResourceGroup": "NP-ninjapaws-dojo-sql-Prod-CentralUS",
+      "sqlVmName": "ninjapaws-sql-vm-prod",
+      "allowPublicSqlAccess": "false",
+      "allowPublicKeyVaultAccess": "false",
+      "webAppName": "ninjapaws-pawton-prod"
+    }
+  }
+}

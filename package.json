@@ -1,0 +1,46 @@
+{
+  "name": "pawton",
+  "version": "1.0.0",
+  "description": "🐾 Pawton is a self-contained Azure security demo: Defender for Servers Plan 2, Defender for SQL, and Microsoft Sentinel protecting SQL Server 2022 on an Azure VM, with a live Astro/Node.js dashboard (Pawton Manufacturing) telling the story end to end.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ninjapaw/pawton.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ninjapaw/pawton/issues"
+  },
+  "homepage": "https://github.com/ninjapaw/pawton#readme",
+  "scripts": {
+    "test": "bash scripts/test.sh --skip-azure",
+    "test:portal": "npm test --prefix apps/pawton-manufacturing",
+    "test:sentinel": "node scripts/test-sentinel-sql.mjs",
+    "test:domain": "node --test scripts/test-pawton-domain.mjs",
+    "wizard": "bash scripts/manage.sh",
+    "deploy:plan": "bash scripts/deploy.sh plan --environment dev",
+    "deploy:doctor": "bash scripts/deploy.sh doctor --environment dev",
+    "deploy:dev": "bash scripts/deploy.sh deploy --environment dev --yes",
+    "deploy:uninstall": "bash scripts/deploy.sh uninstall --environment dev --yes",
+    "domain:plan": "bash scripts/deploy-pawton-domain.sh plan --environment dev",
+    "sentinel:plan": "bash scripts/deploy-sentinel-sql.sh plan --environment dev",
+    "sentinel:doctor": "bash scripts/deploy-sentinel-sql.sh doctor --environment dev",
+    "sentinel:what-if": "bash scripts/deploy-sentinel-sql.sh what-if --environment dev",
+    "sentinel:deploy": "bash scripts/deploy-sentinel-sql.sh deploy --environment dev",
+    "sentinel:verify": "bash scripts/deploy-sentinel-sql.sh verify --environment dev"
+  },
+  "keywords": [
+    "security",
+    "azure",
+    "sql-server",
+    "defender-for-cloud",
+    "sentinel",
+    "training",
+    "education"
+  ],
+  "author": "Dr Bill Mcilhargey",
+  "license": "MIT",
+  "engines": {
+    "node": "24.19.0",
+    "npm": "11.17.0"
+  },
+  "packageManager": "npm@11.17.0"
+}
