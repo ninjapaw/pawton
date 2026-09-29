@@ -191,7 +191,45 @@ case "$SENTINEL_MODE" in
 esac
 GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'dev')"
 BOOTSTRAP_SCRIPT_URL="https://raw.githubusercontent.com/ninjapaw/pawton/${GIT_BRANCH}/scripts/sql/Setup-FutonManufacturing.ps1"
+BOOTSTRAP_SCRIPT_PATH="$REPO_ROOT/scripts/sql/Setup-FutonManufacturing.ps1"
 BICEP_FILE="$AZURE_REPO_ROOT/infra/sql-defender-scenario/main.bicep"
+
+# The Bicep template is read from the local working tree, but the VM downloads the bootstrap script
+# from GitHub raw at provisioning time. A local-only edit to that script is therefore silently
+# ignored, and a parameter mismatch only surfaces as a CustomScriptExtension failure roughly fifteen
+# minutes into the deployment. Compare the two up front so the mismatch is reported in seconds.
+# Returns 0 when they match or the comparison could not be performed, 1 on a confirmed mismatch.
+check_bootstrap_script_freshness() {
+    local remote local_hash remote_hash
+    if [[ ! -f "$BOOTSTRAP_SCRIPT_PATH" ]]; then
+        warn "Local bootstrap script not found at $BOOTSTRAP_SCRIPT_PATH; skipping freshness check."
+        return 0
+    fi
+    remote="$(curl -fsSL --max-time 30 "$BOOTSTRAP_SCRIPT_URL" 2>/dev/null || true)"
+    if [[ -z "$remote" ]]; then
+        warn "Could not download $BOOTSTRAP_SCRIPT_URL; skipping bootstrap freshness check."
+        return 0
+    fi
+    # Normalise CRLF and trailing newlines so a whitespace-only difference is not reported as
+    # drift. Reading the local file through command substitution matches how "$remote" was
+    # captured, since command substitution strips trailing newlines from both.
+    local_hash="$(printf '%s' "$(cat "$BOOTSTRAP_SCRIPT_PATH")" | tr -d '\r' | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')"
+    remote_hash="$(printf '%s' "$remote" | tr -d '\r' | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')"
+    if [[ -z "$local_hash" || -z "$remote_hash" ]]; then
+        warn "Could not hash the bootstrap script for comparison; skipping freshness check."
+        return 0
+    fi
+    if [[ "$local_hash" == "$remote_hash" ]]; then
+        ok "Bootstrap script on branch '$GIT_BRANCH' matches the local copy."
+        return 0
+    fi
+    warn "Bootstrap script drift detected on branch '$GIT_BRANCH'."
+    warn "  local:  $BOOTSTRAP_SCRIPT_PATH"
+    warn "  remote: $BOOTSTRAP_SCRIPT_URL"
+    warn "  The VM downloads the remote copy, so local changes would not take effect."
+    warn "  Commit and push scripts/sql/Setup-FutonManufacturing.ps1 to '$GIT_BRANCH' before deploying."
+    return 1
+}
 
 resolve_audit_context() {
     RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -628,6 +666,8 @@ cmd_doctor() {
     else
         warn "Sentinel workspace '$CENTRAL_WORKSPACE_NAME' does not exist yet; 'deploy' will create it in '$CENTRAL_WORKSPACE_RESOURCE_GROUP'."
     fi
+    info "Checking bootstrap script freshness..."
+    check_bootstrap_script_freshness || true
     complete_status "Complete" "Doctor checks completed. Review warnings before deploying." 100
 }
 
@@ -870,9 +910,11 @@ deploy_web_app_code() {
     if command -v zip >/dev/null 2>&1; then
         (cd "$app_dir" && zip -rq "$zip_path" . -x 'node_modules/*' -x 'dist/*' -x '.astro/*')
     else
-        # Git Bash on Windows has no 'zip' binary; fall back to PowerShell's Compress-Archive,
-        # which is always present, instead of skipping the deployment step entirely.
-        local ps_bin="" win_app_dir win_zip_path
+        # Git Bash on Windows has no 'zip' binary; fall back to PowerShell instead of
+        # skipping the deployment step entirely. Compress-Archive cannot be used here:
+        # Windows PowerShell 5.1 writes backslash separators into the archive, which Oryx
+        # flattens on Linux, so the build silently produces an unusable site.
+        local ps_bin="" win_app_dir win_zip_path win_packager
         for candidate in pwsh.exe powershell.exe; do
             if command -v "$candidate" >/dev/null 2>&1; then ps_bin="$candidate"; break; fi
         done
@@ -883,15 +925,20 @@ deploy_web_app_code() {
         if command -v wslpath >/dev/null 2>&1; then
             win_app_dir="$(wslpath -w "$app_dir")"
             win_zip_path="$(wslpath -w "$zip_path")"
+            win_packager="$(wslpath -w "$REPO_ROOT/scripts/lib/New-AppPackage.ps1")"
         elif command -v cygpath >/dev/null 2>&1; then
             win_app_dir="$(cygpath -w "$app_dir")"
             win_zip_path="$(cygpath -w "$zip_path")"
+            win_packager="$(cygpath -w "$REPO_ROOT/scripts/lib/New-AppPackage.ps1")"
         else
             win_app_dir="$app_dir"
             win_zip_path="$zip_path"
+            win_packager="$REPO_ROOT/scripts/lib/New-AppPackage.ps1"
         fi
-        "$ps_bin" -NoProfile -Command "Get-ChildItem -LiteralPath '$win_app_dir' -Force | Where-Object { \$_.Name -notin @('node_modules','dist','.astro') } | Compress-Archive -DestinationPath '$win_zip_path' -CompressionLevel Optimal -Force" \
-            || { record_check "Pawton Manufacturing dashboard deployed" fail "PowerShell Compress-Archive failed while packaging $app_dir."; return 0; }
+        "$ps_bin" -NoProfile -ExecutionPolicy Bypass -File "$win_packager" \
+            -SourcePath "$win_app_dir" -DestinationPath "$win_zip_path" \
+            -Exclude "node_modules,dist,.astro" \
+            || { record_check "Pawton Manufacturing dashboard deployed" fail "PowerShell packaging failed while zipping $app_dir."; return 0; }
     fi
 
     info "Deploying to $WEB_APP_NAME (remote build via Oryx)..."
@@ -903,10 +950,36 @@ deploy_web_app_code() {
             --settings HOST=0.0.0.0 SQL_CONNECT_TIMEOUT_MS=5000 SQL_REQUEST_TIMEOUT_MS=5000 --output none
         record_check "Pawton Manufacturing dashboard deployed" pass "Zip-deployed $app_dir to $WEB_APP_NAME; Oryx runs the Astro build remotely."
     else
-        warn "Web app code deployment failed: ${deploy_error:-no error detail returned}"
-        record_check "Pawton Manufacturing dashboard deployed" fail "az webapp deploy failed: ${deploy_error:-no error detail returned}"
+        # 'az webapp deploy --async false' waits on a synchronous HTTP call, so a slow Oryx build
+        # can return 504 GatewayTimeout even though the build goes on to succeed server-side.
+        # Reconcile against Kudu's own deployment status before declaring a failure, otherwise a
+        # healthy deployment is reported as broken.
+        if kudu_deploy_succeeded; then
+            ok "Pawton Manufacturing dashboard code deployed (the CLI call timed out, but Kudu reports success)."
+            az webapp config set --resource-group "$RESOURCE_GROUP" --name "$WEB_APP_NAME" --startup-file "node ./dist/server/entry.mjs" --output none
+            az webapp config appsettings set --resource-group "$RESOURCE_GROUP" --name "$WEB_APP_NAME" \
+                --settings HOST=0.0.0.0 SQL_CONNECT_TIMEOUT_MS=5000 SQL_REQUEST_TIMEOUT_MS=5000 --output none
+            record_check "Pawton Manufacturing dashboard deployed" pass "Zip-deployed $app_dir to $WEB_APP_NAME; the CLI call timed out but Kudu reported a successful build."
+        else
+            warn "Web app code deployment failed: ${deploy_error:-no error detail returned}"
+            record_check "Pawton Manufacturing dashboard deployed" fail "az webapp deploy failed: ${deploy_error:-no error detail returned}"
+        fi
     fi
     rm -f "$zip_path"
+}
+
+# Polls Kudu for the most recent deployment result. Status 4 means success, 3 means failure.
+# Returns 0 only when Kudu positively reports success.
+kudu_deploy_succeeded() {
+    local attempt status
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        status="$(az webapp log deployment list --resource-group "$RESOURCE_GROUP" --name "$WEB_APP_NAME" -o json 2>/dev/null \
+            | "$NODE_COMMAND" -e 'try{const d=JSON.parse(require("fs").readFileSync(0,"utf8"));const l=Array.isArray(d)?d[0]:null;process.stdout.write(l&&l.status!=null?String(l.status):"")}catch(e){}' 2>/dev/null || true)"
+        [[ "$status" == 4 ]] && return 0
+        [[ "$status" == 3 ]] && return 1
+        sleep 30
+    done
+    return 1
 }
 
 run_verification() {
@@ -952,7 +1025,11 @@ run_verification() {
     fi
 
     if [[ "$DEPLOY_BASTION" == true ]]; then
-        bastion_state="$(az network bastion show --resource-group "$RESOURCE_GROUP" --name "${VM_NAME}-bastion" --query provisioningState -o tsv 2>/dev/null || true)"
+        # 'az network bastion show' lives in the optional 'bastion' CLI extension. When it is absent
+        # the CLI emits a dynamic-install prompt, which then gets captured as the check's value.
+        # 'az resource show' is part of the core CLI, so the result is deterministic everywhere.
+        bastion_state="$(az resource show --resource-group "$RESOURCE_GROUP" --name "${VM_NAME}-bastion" \
+            --resource-type Microsoft.Network/bastionHosts --query properties.provisioningState -o tsv 2>/dev/null || true)"
         [[ "$bastion_state" == Succeeded ]] && record_check "Azure Bastion provisioned" pass "Bastion is available for browser-based RDP." \
             || record_check "Azure Bastion provisioned" unknown "Provisioning state: ${bastion_state:-unavailable}."
 
@@ -1021,12 +1098,20 @@ run_verification() {
     fi
 
     if [[ -n "$WEB_APP_HOSTNAME" ]]; then
-        root_http_code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 "https://$WEB_APP_HOSTNAME/" 2>/dev/null || true)"
+        # These run immediately after the app settings update restarts App Service, so a single
+        # probe can catch the site mid-restart and report a false failure. Retry briefly.
+        local attempt
+        for attempt in 1 2 3 4 5; do
+            root_http_code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 "https://$WEB_APP_HOSTNAME/" 2>/dev/null || true)"
+            health_body="$(curl -sk --max-time 20 "https://$WEB_APP_HOSTNAME/health" 2>/dev/null || true)"
+            health_http_code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 "https://$WEB_APP_HOSTNAME/health" 2>/dev/null || true)"
+            [[ "$root_http_code" == 200 && "$health_http_code" == 200 && "$health_body" == *'"connected"'* ]] && break
+            [[ $attempt -lt 5 ]] && sleep 15
+        done
+
         [[ "$root_http_code" == 200 ]] && record_check "Dashboard home page responds" pass "HTTP $root_http_code from https://$WEB_APP_HOSTNAME/." \
             || record_check "Dashboard home page responds" unknown "HTTP ${root_http_code:-no response} from https://$WEB_APP_HOSTNAME/; the Oryx build may still be running."
 
-        health_body="$(curl -sk --max-time 20 "https://$WEB_APP_HOSTNAME/health" 2>/dev/null || true)"
-        health_http_code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 20 "https://$WEB_APP_HOSTNAME/health" 2>/dev/null || true)"
         if [[ "$health_http_code" == 200 && "$health_body" == *'"connected"'* ]]; then
             record_check "Dashboard reaches the SQL Server VM" pass "/health reports the database connected."
         else
@@ -1241,6 +1326,7 @@ cmd_deploy() {
     initialize_status_report
     update_status "Reviewing plan" "Resolved Scenario 2 settings and waiting for deployment confirmation." 12
     print_plan
+    check_bootstrap_script_freshness || fail "Bootstrap script drift would fail the VM provisioning step. Push the script to '$GIT_BRANCH' and retry."
     if [[ "$ASSUME_YES" != true ]]; then
         read -r -p "Proceed with deployment? [y/N] " reply
         [[ "$reply" =~ ^[Yy]$ ]] || fail "Aborted."
