@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Ninja Paws Cloud Security Dojo - Scenario 2 VM bootstrap.
+    Ninja Paws Cloud Security Dojo - Pawton VM bootstrap.
 
 .DESCRIPTION
     Runs via the Custom Script Extension after SQL Server is available on the

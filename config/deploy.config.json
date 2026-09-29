@@ -11,12 +11,12 @@
     "disclaimer": "This project provisions an INTENTIONALLY VULNERABLE training environment. Deploy only to an isolated subscription you control. Provided as-is, without warranty of any kind. USE AT YOUR OWN RISK."
   },
   "defaults": {
-    "scenario": "defender-sql-scenario-2",
-    "scenarioIds": "defender-sql-scenario-2",
+    "scenario": "pawton-sql-defender",
+    "scenarioIds": "pawton-sql-defender",
     "location": "centralus"
   },
   "scenarios": {
-    "defender-sql-scenario-2": {
+    "pawton-sql-defender": {
       "name": "Defender for Cloud: SQL Server on Azure VM Protection",
       "shortName": "SQL Server on Azure VM Protection",
       "cve": "N/A",

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-# Scenario 2 lifecycle: SQL Server on an Azure VM, hardened with Defender for Servers Plan 2
+# Pawton lifecycle: SQL Server on an Azure VM, hardened with Defender for Servers Plan 2
 # (Defender for Endpoint) and Defender for SQL, seeded with the Futon Manufacturing sample
-# database. This mirrors the conventions of scripts/deploy.sh (Scenario 1) but is a separate,
-# self-contained script because the two scenarios provision fundamentally different Azure
-# architectures (App Service + ACR vs. IaaS VM + SQL Server) and should not share deployment
-# state or accidentally cross-apply App Service settings to a VM, or vice versa.
+# database. Pawton lives in its own repository and provisions its own resource group, so it
+# stays a separate, self-contained script from the App Service + ACR Dojo scenarios: those
+# provision a fundamentally different Azure architecture (PaaS vs. IaaS VM + SQL Server) and
+# must not share deployment state or cross-apply App Service settings to a VM, or vice versa.
 
 set -Eeuo pipefail
 
@@ -16,7 +16,7 @@ cd "$REPO_ROOT"
 source "$SCRIPT_DIR/lib/common.sh"
 
 CONFIG_FILE="${DEPLOY_CONFIG_FILE:-$REPO_ROOT/config/deploy.config.json}"
-SCENARIO_ID="defender-sql-scenario-2"
+SCENARIO_ID="pawton-sql-defender"
 COMMAND="deploy"
 ENVIRONMENT="${DEPLOY_ENVIRONMENT:-dev}"
 SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-${SUBSCRIPTION_ID:-}}"
@@ -57,7 +57,7 @@ NO_STATUS_HTML=false
 REPORT_LINK_PRINTED=false
 STATUS_BROWSER_OPENED=false
 CURRENT_STATUS_PHASE="Starting"
-CURRENT_STATUS_DETAIL="Preparing Scenario 2 lifecycle command."
+CURRENT_STATUS_DETAIL="Preparing Pawton lifecycle command."
 CURRENT_STATUS_PERCENT=5
 
 # config_lookup and config_scenario_ids come from lib/common.sh.
@@ -271,7 +271,7 @@ print_report_link() {
     if command -v clip.exe >/dev/null 2>&1; then
         printf '%s' "$url" | clip.exe 2>/dev/null && copy_note="(copied to clipboard)"
     fi
-    echo -e "${BLUE}--- LIVE SCENARIO 2 STATUS REPORT (${ENVIRONMENT}) ---${NC}"
+    echo -e "${BLUE}--- LIVE PAWTON STATUS REPORT (${ENVIRONMENT}) ---${NC}"
     echo -e "  ${CYAN}${url}${NC} ${copy_note}"
 }
 
@@ -344,7 +344,7 @@ initialize_status_report() {
     STATUS_HTML="$out_dir/sql-deployment-$ENVIRONMENT.status.html"
     FINAL_REPORT_FILE="$out_dir/sql-deployment-$ENVIRONMENT.html"
     STATUS_OPEN_MARKER="$OUTPUT_ROOT/.sql-deployment-$ENVIRONMENT.browser-opened"
-    update_status "Starting" "Preparing Scenario 2 lifecycle command." 5
+    update_status "Starting" "Preparing Pawton lifecycle command." 5
     open_status_html
 }
 
@@ -414,7 +414,7 @@ write_status_report() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 $refresh
-<title>$(html_escape "$(project_meta name 'Ninja Paws Cloud Security Dojo')") — Scenario 2 live status ($ENVIRONMENT)</title>
+<title>$(html_escape "$(project_meta name 'Ninja Paws Cloud Security Dojo')") — Pawton live status ($ENVIRONMENT)</title>
 <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #eef3f8; color: #152238; }
     body { margin: 0; padding: 28px; background: radial-gradient(circle at 82% 0%, #cde7f2 0, transparent 34%), #eef3f8; }
@@ -452,7 +452,7 @@ $refresh
 <main>
     <header>
         <div class="brand"><span class="mark">NP</span><span><strong>NINJA PAWS</strong><small> CLOUD SECURITY DOJO</small></span></div>
-        <h1>Scenario 2 live status: $(html_escape "$ENVIRONMENT")</h1>
+        <h1>Pawton live status: $(html_escape "$ENVIRONMENT")</h1>
         <p><span class="pill $status_class">$(html_escape "$final_label")</span> $(html_escape "$phase")</p>
         <p>$(html_escape "$detail")</p>
         <div class="bar" aria-label="Deployment progress"><div class="fill"></div></div>
@@ -1019,7 +1019,7 @@ run_verification() {
 
     nic_public_ip="$(az network nic show --resource-group "$RESOURCE_GROUP" --name "${VM_NAME}-nic" --query "ipConfigurations[0].publicIPAddress" -o tsv 2>/dev/null || true)"
     if [[ -n "$nic_public_ip" ]]; then
-        record_check "SQL Server VM public SQL endpoint" pass "The VM NIC has public IP resource $nic_public_ip; inbound TCP 1433 is enabled by the Scenario 2 NSG."
+        record_check "SQL Server VM public SQL endpoint" pass "The VM NIC has public IP resource $nic_public_ip; inbound TCP 1433 is enabled by the Pawton NSG."
     else
         record_check "SQL Server VM public SQL endpoint" not_applicable "No public IP is attached; use the private endpoint or Bastion path."
     fi
@@ -1087,14 +1087,14 @@ run_verification() {
         fi
     fi
 
-    # Defender for App Service is a subscription-wide plan, so this Web App is covered by the
-    # same plan Scenario 1 requests -- this check demonstrates that shared coverage, not a
-    # separate activation, which is why this script never calls 'az security pricing create' for it.
+    # Defender for App Service is a subscription-wide plan, so this Web App is covered by whichever
+    # deployment enabled it -- this check demonstrates that shared coverage, not a separate
+    # activation, which is why this script never calls 'az security pricing create' for it.
     defender_appservices_tier="$(az security pricing show --name AppServices --query pricingTier -o tsv 2>/dev/null || true)"
     if [[ "$defender_appservices_tier" == Standard ]]; then
         record_check "Defender for App Service covers this Web App" pass "Subscription-wide AppServices plan is Standard, so it protects $WEB_APP_NAME automatically."
     else
-        record_check "Defender for App Service covers this Web App" unknown "Subscription reports AppServices tier='${defender_appservices_tier:-unknown}'. Enable it via Scenario 1's deploy or 'az security pricing create --name AppServices --tier Standard'."
+        record_check "Defender for App Service covers this Web App" unknown "Subscription reports AppServices tier='${defender_appservices_tier:-unknown}'. Enable it subscription-wide with 'az security pricing create --name AppServices --tier Standard'."
     fi
 
     if [[ -n "$WEB_APP_HOSTNAME" ]]; then
@@ -1171,7 +1171,7 @@ write_report() {
         verdict="SUCCEEDED"; verdict_class="ok"
         verdict_note="All $pass_count checks passed."
     fi
-    headline="Scenario 2 deployment: $ENVIRONMENT"
+    headline="Pawton deployment: $ENVIRONMENT"
 
     cat > "$out_file" <<HTML
 <!doctype html>
@@ -1179,7 +1179,7 @@ write_report() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>$(html_escape "$(project_meta name 'Ninja Paws Cloud Security Dojo')") — Scenario 2 deployment ($ENVIRONMENT)</title>
+<title>$(html_escape "$(project_meta name 'Ninja Paws Cloud Security Dojo')") — Pawton deployment ($ENVIRONMENT)</title>
 <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #eef3f8; color: #152238; }
     body { margin: 0; padding: 32px; background: radial-gradient(circle at 85% 0%, #cde7f2 0, transparent 35%), #eef3f8; }
@@ -1324,23 +1324,23 @@ cmd_deploy() {
     fi
     require_login
     initialize_status_report
-    update_status "Reviewing plan" "Resolved Scenario 2 settings and waiting for deployment confirmation." 12
+    update_status "Reviewing plan" "Resolved Pawton settings and waiting for deployment confirmation." 12
     print_plan
     check_bootstrap_script_freshness || fail "Bootstrap script drift would fail the VM provisioning step. Push the script to '$GIT_BRANCH' and retry."
     if [[ "$ASSUME_YES" != true ]]; then
         read -r -p "Proceed with deployment? [y/N] " reply
         [[ "$reply" =~ ^[Yy]$ ]] || fail "Aborted."
     fi
-    update_status "Preparing resource group" "Ensuring the Scenario 2 resource group exists." 18
+    update_status "Preparing resource group" "Ensuring the Pawton resource group exists." 18
     ensure_resource_group
     ensure_central_workspace
     run_deployment
     run_verification
-    update_status "Writing audit report" "Writing the final Scenario 2 audit and verification report." 96
+    update_status "Writing audit report" "Writing the final Pawton audit and verification report." 96
     write_report
-    complete_status "Complete" "Scenario 2 deployment completed. The final audit report is linked from this page." 100
+    complete_status "Complete" "Pawton deployment completed. The final audit report is linked from this page." 100
     echo
-    ok "Scenario 2 deployment complete. See the report above for verification results."
+    ok "Pawton deployment complete. See the report above for verification results."
     [[ -n "$WEB_APP_HOSTNAME" ]] && echo -e "${GREEN}Pawton Manufacturing dashboard:${NC} https://$WEB_APP_HOSTNAME/ (Oryx build can take a couple of minutes after this script finishes)"
     echo -e "${YELLOW}Reminder:${NC} run '$0 uninstall --environment $ENVIRONMENT --yes' when finished to avoid ongoing VM charges."
 }
@@ -1351,7 +1351,7 @@ cmd_uninstall() {
     fi
     require_login
     initialize_status_report
-    update_status "Confirming uninstall" "Preparing to delete the Scenario 2 resource group." 20
+    update_status "Confirming uninstall" "Preparing to delete the Pawton resource group." 20
     if [[ "$ASSUME_YES" != true ]]; then
         read -r -p "Delete resource group '$RESOURCE_GROUP' and everything in it? [y/N] " reply
         [[ "$reply" =~ ^[Yy]$ ]] || fail "Aborted."
