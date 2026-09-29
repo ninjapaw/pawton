@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "15127511319572044963"
+      "templateHash": "17406478437747612630"
     }
   },
   "parameters": {
@@ -983,7 +983,7 @@
       "condition": "[parameters('deployWebApp')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[format('Microsoft.KeyVault/vaults/{0}/secrets/{1}', variables('keyVaultResourceName'), 'sql-sa-login-username')]",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-username')]",
       "name": "[guid(resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-username'), parameters('webAppName'), 'kvSecretsOfficer')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
@@ -999,7 +999,7 @@
       "condition": "[parameters('deployWebApp')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[format('Microsoft.KeyVault/vaults/{0}/secrets/{1}', variables('keyVaultResourceName'), 'sql-sa-login-password')]",
+      "scope": "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-password')]",
       "name": "[guid(resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-password'), parameters('webAppName'), 'kvSecretsOfficer')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
