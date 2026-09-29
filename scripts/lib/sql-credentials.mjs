@@ -14,7 +14,7 @@
 // has no npm dependencies, and every script that needs these credentials is already run alongside
 // scripts/deploy.sh, which requires the Azure CLI.
 
-import { execFile } from "node:child_process";
+import { execFile, exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
   APP_LOGIN_NAME,
@@ -23,6 +23,32 @@ import {
 } from "../../apps/pawton-manufacturing/src/lib/sqlIdentities.mjs";
 
 const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
+
+// On Windows the Azure CLI is 'az.cmd', and Node refuses to spawn .cmd files directly (spawning
+// 'az' fails ENOENT because PATHEXT is not consulted, and spawning 'az.cmd' fails EINVAL), so the
+// command must go through cmd.exe there. Every value interpolated into that command line is first
+// checked against Key Vault's own naming rules, which allow only letters, digits, and hyphens, so
+// no shell metacharacter can reach it.
+const IS_WINDOWS = process.platform === "win32";
+
+// Key Vault restricts vault and secret names to alphanumerics and hyphens.
+const KEY_VAULT_NAME_PATTERN = /^[A-Za-z0-9-]{1,127}$/;
+
+function assertShellSafeName(value, label) {
+  if (!KEY_VAULT_NAME_PATTERN.test(value))
+    throw new CredentialError(
+      `${label} '${value}' is not a valid Key Vault name. Use only letters, digits, and hyphens.`,
+    );
+  return value;
+}
+
+/** Runs the Azure CLI, routing through cmd.exe on Windows where 'az' is a batch shim. */
+function runAz(args) {
+  if (IS_WINDOWS)
+    return execAsync(["az.cmd", ...args].join(" "), { windowsHide: true });
+  return execFileAsync("az", args, { windowsHide: true });
+}
 
 export const APP_PASSWORD_SECRET = "sql-app-login-password";
 export const PLATFORM_OPS_PASSWORD_SECRET = "sql-platform-ops-password";
@@ -34,28 +60,34 @@ export class CredentialError extends Error {}
  * can raise an error that names the missing secret and how to create it.
  */
 export async function readKeyVaultSecret(vaultName, secretName) {
+  assertShellSafeName(vaultName, "Key Vault name");
+  assertShellSafeName(secretName, "Key Vault secret name");
   try {
-    const { stdout } = await execFileAsync(
-      "az",
-      [
-        "keyvault",
-        "secret",
-        "show",
-        "--vault-name",
-        vaultName,
-        "--name",
-        secretName,
-        "--query",
-        "value",
-        "-o",
-        "tsv",
-      ],
-      { windowsHide: true },
-    );
+    const { stdout } = await runAz([
+      "keyvault",
+      "secret",
+      "show",
+      "--vault-name",
+      vaultName,
+      "--name",
+      secretName,
+      "--query",
+      "value",
+      "-o",
+      "tsv",
+    ]);
     const value = stdout.replace(/\r?\n$/, "");
     return value === "" ? null : value;
   } catch (error) {
-    if (error.code === "ENOENT")
+    if (error instanceof CredentialError) throw error;
+    // Without a shell a missing CLI surfaces as ENOENT; through one it surfaces only as the
+    // shell's own "not found" text on stderr, so both are treated as "the CLI is unavailable"
+    // rather than "the secret is missing".
+    const stderr = String(error.stderr ?? "");
+    const missingCli =
+      error.code === "ENOENT" ||
+      /not recognized as an internal or external command|command not found/i.test(stderr);
+    if (missingCli)
       throw new CredentialError(
         "The Azure CLI ('az') is required to read SQL credentials from Key Vault. Install it, run 'az login', or set the SQL_* environment variables explicitly.",
       );

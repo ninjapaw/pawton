@@ -79,10 +79,56 @@ test -f "$REPO_ROOT/config/deploy.config.json"
 
 if [[ "$SKIP_AZURE" == false ]]; then
     if command -v az >/dev/null 2>&1 && az bicep version >/dev/null 2>&1; then
-        echo "Compiling Bicep templates..."
-        az bicep build --file "$REPO_ROOT/infra/sql-defender-scenario/main.bicep" --stdout >/dev/null
-        az bicep build --file "$REPO_ROOT/infra/sentinel-sql-solution/main.bicep" --stdout >/dev/null
-        az bicep build --file "$REPO_ROOT/infra/sql-canary/main.bicep" --stdout >/dev/null
+        # Mirrors the kit-bicep-validate workflow so a green local run means a green CI run:
+        # every template is linted (warnings are failures) and every committed ARM sibling is
+        # checked for drift. Compiling only the entry-point templates previously let a
+        # hand-edited main.json reach the branch without anything noticing.
+        echo "Compiling and linting Bicep templates..."
+        bicep_failed=false
+        while IFS= read -r bicep_file; do
+            rel_path="${bicep_file#"$REPO_ROOT/"}"
+            build_stderr="$(mktemp)"
+            build_stdout="$(mktemp)"
+            if ! az bicep build --file "$bicep_file" --stdout >"$build_stdout" 2>"$build_stderr"; then
+                echo "  FAIL  $rel_path did not compile:" >&2
+                cat "$build_stderr" >&2
+                bicep_failed=true
+                rm -f "$build_stderr" "$build_stdout"
+                continue
+            fi
+            # Bicep reports findings as "<file>(line,col) : Warning <code>: <message>". The
+            # "Info" lines about a custom bicepconfig.json are notices, not findings.
+            if grep -Eq ': (Warning|Error) ' "$build_stderr"; then
+                echo "  FAIL  $rel_path has lint findings:" >&2
+                grep -E ': (Warning|Error) ' "$build_stderr" >&2
+                bicep_failed=true
+            fi
+
+            # Templates with a committed ARM sibling must match what the compiler produces now.
+            arm_sibling="${bicep_file%.bicep}.json"
+            if [[ -f "$arm_sibling" ]]; then
+                if ! "$NODE_COMMAND" -e '
+                    const fs = require("fs");
+                    const sortKeys = (value) =>
+                        Array.isArray(value)
+                            ? value.map(sortKeys)
+                            : value && typeof value === "object"
+                              ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeys(value[k])]))
+                              : value;
+                    const read = (file) => JSON.stringify(sortKeys(JSON.parse(fs.readFileSync(file, "utf8"))));
+                    process.exit(read(process.argv[1]) === read(process.argv[2]) ? 0 : 1);
+                ' "$build_stdout" "$arm_sibling"; then
+                    echo "  FAIL  ${arm_sibling#"$REPO_ROOT/"} is stale; regenerate it with 'az bicep build --file $rel_path --outfile ${arm_sibling#"$REPO_ROOT/"}'." >&2
+                    bicep_failed=true
+                fi
+            fi
+            rm -f "$build_stderr" "$build_stdout"
+        done < <(find "$REPO_ROOT/infra" -name '*.bicep' | sort)
+
+        if [[ "$bicep_failed" == true ]]; then
+            echo "Bicep validation failed." >&2
+            exit 1
+        fi
     else
         echo "Azure CLI/Bicep unavailable; skipping compilation. Re-run without --skip-azure once installed." >&2
     fi
