@@ -237,7 +237,11 @@ SERVER` to manage the built-in administrator. Compromise of the app or its crede
   Vault Secrets Officer role to update the two built-in-administrator secrets. That role is
   assigned on those two secrets individually, not across the vault, so the portal's identity
   cannot read `sql-platform-ops-password` — the credential reserved for scripts and back-end SQL
-  administration.
+  administration. Earlier revisions granted that identity Key Vault Secrets User and Secrets
+  Officer across the whole vault. An incremental ARM deployment never deletes role assignments the
+  template has stopped declaring, so `scripts/deploy.sh` removes those leftover vault-wide grants
+  itself after each deploy — otherwise the narrowed scope would be silently shadowed by the older,
+  broader ones on any environment first deployed before this change.
 - **Audit coverage.** `SERVER_PRINCIPAL_CHANGE_GROUP` covers login enable/disable/rename;
   `LOGIN_CHANGE_PASSWORD_GROUP` covers password changes; the database specification covers
   `SELECT`/`INSERT`/`UPDATE`/`DELETE`. A "Windows Event confirmation" section on `/admin` runs a

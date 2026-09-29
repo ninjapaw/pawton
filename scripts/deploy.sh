@@ -486,6 +486,68 @@ record_check() {
     esac
 }
 
+# Earlier revisions granted the dashboard's managed identity Key Vault Secrets User and Key Vault
+# Secrets Officer across the entire vault. The template now grants Secrets Officer on just the two
+# 'sql-sa-login-*' secrets, but an incremental ARM deployment never deletes role assignments it has
+# stopped declaring, so on any environment deployed before that change the vault-wide grants survive
+# and still let the public web app read 'sql-platform-ops-password' -- the credential reserved for
+# repository scripts and back-end SQL administration. Revoke them explicitly so the narrowed scope
+# actually takes effect instead of being silently shadowed by the leftovers.
+revoke_legacy_vault_wide_web_app_access() {
+    local vault_id principal_id vault_id_lower assignment_scope_lower assignments_tsv
+    local assignment_id assignment_scope role_name removed=0 failed=0
+
+    [[ "$DEPLOY_WEB_APP" == true && -n "$WEB_APP_NAME" && -n "$KEY_VAULT_NAME" ]] || return 0
+
+    principal_id="$(az webapp identity show --resource-group "$RESOURCE_GROUP" --name "$WEB_APP_NAME" \
+        --query principalId -o tsv 2>/dev/null || true)"
+    vault_id="$(az keyvault show --name "$KEY_VAULT_NAME" --resource-group "$RESOURCE_GROUP" \
+        --query id -o tsv 2>/dev/null || true)"
+    if [[ -z "$principal_id" || -z "$vault_id" ]]; then
+        record_check "Vault-wide dashboard access revoked" unknown "Could not resolve the Web App identity or Key Vault resource ID, so legacy vault-wide role assignments were not checked. Review them with 'az role assignment list --scope <vault-id>'."
+        return 0
+    fi
+
+    vault_id_lower="$(printf '%s' "$vault_id" | tr '[:upper:]' '[:lower:]')"
+
+    # Filtering on principalId client-side avoids '--assignee', which resolves the identity through
+    # Microsoft Graph and fails when the caller lacks directory read permission. MSYS_NO_PATHCONV
+    # keeps Git Bash on Windows from rewriting the leading '/subscriptions/...' of a resource ID
+    # into a Windows path, which the CLI then rejects as a missing subscription. The listing is
+    # captured separately so a failed query is reported as unknown rather than being indistinguishable
+    # from "no leftover grants exist", which would wrongly report the vault as already narrowed.
+    if ! assignments_tsv="$(MSYS_NO_PATHCONV=1 az role assignment list --scope "$vault_id" -o tsv \
+        --query "[?principalId=='$principal_id' && (roleDefinitionName=='Key Vault Secrets User' || roleDefinitionName=='Key Vault Secrets Officer')].[id,scope,roleDefinitionName]" \
+        2>/dev/null)"; then
+        record_check "Vault-wide dashboard access revoked" unknown "Could not list role assignments on $KEY_VAULT_NAME, so legacy vault-wide grants were neither confirmed nor removed. Check with 'az role assignment list --scope $vault_id'."
+        return 0
+    fi
+
+    while IFS=$'\t' read -r assignment_id assignment_scope role_name; do
+        [[ -n "$assignment_id" ]] || continue
+        # 'az role assignment list --scope' also returns assignments inherited from the resource
+        # group and subscription. Those belong to broader scopes that this script does not own, so
+        # only delete grants written directly on the vault. Azure echoes scopes back with
+        # inconsistent casing ('resourcegroups' vs 'resourceGroups'), hence the normalized compare.
+        assignment_scope_lower="$(printf '%s' "$assignment_scope" | tr '[:upper:]' '[:lower:]')"
+        [[ "$assignment_scope_lower" == "$vault_id_lower" ]] || continue
+        if MSYS_NO_PATHCONV=1 az role assignment delete --ids "$assignment_id" --output none 2>/dev/null; then
+            removed=$((removed + 1))
+        else
+            failed=$((failed + 1))
+            warn "Could not delete legacy '$role_name' assignment $assignment_id on $KEY_VAULT_NAME."
+        fi
+    done <<<"$assignments_tsv"
+
+    if ((failed > 0)); then
+        record_check "Vault-wide dashboard access revoked" fail "$failed legacy vault-wide Key Vault role assignment(s) for $WEB_APP_NAME could not be deleted; the dashboard identity may still be able to read 'sql-platform-ops-password'. Delete them manually with 'az role assignment delete --ids <id>'."
+    elif ((removed > 0)); then
+        record_check "Vault-wide dashboard access revoked" pass "Removed $removed legacy vault-wide Key Vault role assignment(s) from $WEB_APP_NAME. Its identity now reaches only the 'sql-sa-login-username' and 'sql-sa-login-password' secrets."
+    else
+        record_check "Vault-wide dashboard access revoked" pass "No vault-wide Key Vault role assignments exist for $WEB_APP_NAME; its identity reaches only the 'sql-sa-login-username' and 'sql-sa-login-password' secrets."
+    fi
+}
+
 require_login() {
     local account_info
     account_info="$(az account show --query "[id,tenantId,name,user.name]" -o tsv 2>/dev/null || true)"
@@ -745,6 +807,8 @@ run_deployment() {
         record_check "VM admin credentials stored in Key Vault" pass "Secrets 'vm-admin-username' and 'vm-admin-password' in $KEY_VAULT_NAME; retrieve them with 'az keyvault secret show --vault-name $KEY_VAULT_NAME --name <secret-name>'."
         record_check "Built-in SQL administrator credentials stored in Key Vault" pass "Secrets 'sql-sa-login-username' and 'sql-sa-login-password' in $KEY_VAULT_NAME; the portal updates them after a rename or password rotation."
     fi
+
+    revoke_legacy_vault_wide_web_app_access
 
     vm_principal_id="$(read_output "$output_json" principalId)"
     if [[ -n "$vm_principal_id" ]]; then
