@@ -1,3 +1,8 @@
+import {
+  APP_LOGIN_NAME,
+  assertNotBuiltInAdminLogin,
+} from "./sqlIdentities.mjs";
+
 export function readSqlTimeout(name, environment = process.env) {
   const value = Number(environment[name]);
   return Number.isFinite(value) && value > 0 ? value : 5000;
@@ -10,7 +15,7 @@ export function readSqlConfig({
   const {
     SQL_SERVER_HOST: server,
     SQL_DATABASE: database = "FutonManufacturing",
-    SQL_APP_LOGIN: appLogin = "futon_app",
+    SQL_APP_LOGIN: appLogin = APP_LOGIN_NAME,
     SQL_APP_LOGIN_PASSWORD: appPassword,
     SQL_ADMIN_LOGIN: adminLogin,
     SQL_ADMIN_LOGIN_PASSWORD: adminPassword,
@@ -18,6 +23,10 @@ export function readSqlConfig({
   const user = privileged ? adminLogin : appLogin;
   const password = privileged ? adminPassword : appPassword;
   if (!server || !password || (privileged && !user)) return null;
+  assertNotBuiltInAdminLogin(
+    user,
+    privileged ? "The SQL administration connection" : "The application SQL connection",
+  );
   return {
     server,
     database: privileged ? "master" : database,

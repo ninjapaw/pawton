@@ -13,6 +13,18 @@ import {
   readSqlTimeout,
 } from "../apps/pawton-manufacturing/src/lib/sqlConfig.mjs";
 import {
+  PLATFORM_OPS_LOGIN_NAME,
+  isBuiltInAdminLoginName,
+  isReservedServiceLoginName,
+} from "../apps/pawton-manufacturing/src/lib/sqlIdentities.mjs";
+
+// Opt-in local container tests authenticate with a purpose-made login rather than the container's
+// built-in administrator, so no test path ever attempts an 'sa' sign-in. See CONTRIBUTING.md.
+const TEST_SQL_LOGIN = process.env.DOJO_TEST_SQL_LOGIN || "dojo_test_admin";
+const TEST_SQL_PASSWORD = process.env.DOJO_TEST_SQL_PASSWORD;
+const skipContainerTests =
+  !process.env.DOJO_AUDIT_TEST_PORT || !TEST_SQL_PASSWORD;
+import {
   DEFAULT_TIME_ZONE,
   getPortalTimeZone,
   formatTimestamp,
@@ -158,7 +170,7 @@ test("auditing page shares a generic preview-first SQL template with its downloa
 test(
   "reusable auditing SQL previews, applies, and verifies database/schema/table/view scopes",
   {
-    skip: !process.env.DOJO_AUDIT_TEST_PORT,
+    skip: skipContainerTests,
   },
   async () => {
     const requireApp = createRequire(
@@ -175,8 +187,8 @@ test(
     const pool = await new sql.ConnectionPool({
       server: "127.0.0.1",
       port: Number(process.env.DOJO_AUDIT_TEST_PORT),
-      user: "sa",
-      password: process.env.MSSQL_SA_PASSWORD,
+      user: TEST_SQL_LOGIN,
+      password: TEST_SQL_PASSWORD,
       database: "master",
       options: { encrypt: true, trustServerCertificate: true },
       requestTimeout: 30000,
@@ -433,6 +445,60 @@ test("shared SQL configuration preserves credential and pool separation", () => 
   assert.equal(custom.database, "Custom");
   assert.equal(custom.user, "reader");
   assert.equal(custom.requestTimeout, 1200);
+});
+
+test("SQL connections refuse the built-in administrator and reserve the platform operations login", () => {
+  const base = {
+    SQL_SERVER_HOST: "localhost",
+    SQL_APP_LOGIN_PASSWORD: "app-test-only",
+  };
+  // Scripts and the dashboard must never authenticate as the built-in administrator: it is
+  // disabled between demos, so every attempt becomes a failed sign-in that Defender for Cloud
+  // reports as a harmful-application logon.
+  for (const name of ["sa", "SA", " Sa "]) {
+    assert.equal(isBuiltInAdminLoginName(name), true);
+    assert.throws(
+      () => readSqlConfig({ environment: { ...base, SQL_APP_LOGIN: name } }),
+      /built-in SQL administrator/,
+    );
+    assert.throws(
+      () =>
+        readSqlConfig({
+          environment: {
+            ...base,
+            SQL_ADMIN_LOGIN: name,
+            SQL_ADMIN_LOGIN_PASSWORD: "admin-test-only",
+          },
+          privileged: true,
+        }),
+      /built-in SQL administrator/,
+    );
+  }
+  assert.equal(isBuiltInAdminLoginName("dojo_demo_reader"), false);
+  assert.equal(PLATFORM_OPS_LOGIN_NAME, "dojo_platform_ops_svc");
+  // The web app is never told the platform operations login's name, so it is reserved
+  // unconditionally rather than through an environment variable.
+  assert.equal(isReservedServiceLoginName(PLATFORM_OPS_LOGIN_NAME, {}), true);
+  assert.equal(
+    isReservedServiceLoginName(PLATFORM_OPS_LOGIN_NAME, {
+      SQL_APP_LOGIN: "other",
+      SQL_ADMIN_LOGIN: "other_admin",
+      SQL_PLATFORM_OPS_LOGIN: "other_ops",
+    }),
+    true,
+  );
+  assert.equal(isReservedServiceLoginName("dojo_demo_reader", {}), false);
+  // The platform operations login still authenticates normally.
+  const ops = readSqlConfig({
+    environment: {
+      ...base,
+      SQL_ADMIN_LOGIN: PLATFORM_OPS_LOGIN_NAME,
+      SQL_ADMIN_LOGIN_PASSWORD: "ops-test-only",
+    },
+    privileged: true,
+  });
+  assert.equal(ops.user, PLATFORM_OPS_LOGIN_NAME);
+  assert.equal(ops.database, "master");
 });
 
 test("portal timestamps use configurable Eastern time without changing instants", () => {
@@ -911,7 +977,7 @@ test("lab-table runner rejects invalid modes before SQL and retains sanitized fa
 
 test(
   "lab-table comparison executes on disposable SQL with numeric and quoted text IDs",
-  { skip: !process.env.DOJO_AUDIT_TEST_PORT },
+  { skip: skipContainerTests },
   async () => {
     const { runLabTableInjection } =
       await import("../apps/pawton-manufacturing/src/lib/sqlInjectionProbe.mjs");
@@ -923,8 +989,8 @@ test(
     const pool = new sql.ConnectionPool({
       server: "127.0.0.1",
       port: Number(process.env.DOJO_AUDIT_TEST_PORT),
-      user: "sa",
-      password: process.env.MSSQL_SA_PASSWORD,
+      user: TEST_SQL_LOGIN,
+      password: TEST_SQL_PASSWORD,
       database: "master",
       options: { encrypt: true, trustServerCertificate: true },
       pool: { max: 1, min: 0 },
@@ -1168,7 +1234,7 @@ test("synthetic injection requires baseline, unsafe and parameterized counts wit
 
 test(
   "bounded SQL probes execute against disposable SQL Server",
-  { skip: !process.env.DOJO_AUDIT_TEST_PORT },
+  { skip: skipContainerTests },
   async () => {
     const requireApp = createRequire(
       new URL("../apps/pawton-manufacturing/package.json", import.meta.url),
@@ -1178,8 +1244,8 @@ test(
       environment: {
         SQL_SERVER_HOST: "127.0.0.1",
         SQL_DATABASE: "master",
-        SQL_APP_LOGIN: "sa",
-        SQL_APP_LOGIN_PASSWORD: process.env.MSSQL_SA_PASSWORD,
+        SQL_APP_LOGIN: TEST_SQL_LOGIN,
+        SQL_APP_LOGIN_PASSWORD: TEST_SQL_PASSWORD,
       },
       makePool: (config) =>
         new sql.ConnectionPool({
@@ -1200,8 +1266,8 @@ test(
       environment: {
         SQL_SERVER_HOST: "127.0.0.1",
         SQL_DATABASE: "master",
-        SQL_APP_LOGIN: "sa",
-        SQL_APP_LOGIN_PASSWORD: process.env.MSSQL_SA_PASSWORD,
+        SQL_APP_LOGIN: TEST_SQL_LOGIN,
+        SQL_APP_LOGIN_PASSWORD: TEST_SQL_PASSWORD,
       },
       makePool: (config) =>
         new sql.ConnectionPool({
@@ -2432,6 +2498,8 @@ test("built-in, system, Windows, privileged and service logins are protected", (
     { ...demo, name: "##system##" },
     { ...demo, name: "futon_app" },
     { ...demo, name: "dojo_admin_portal_svc" },
+    { ...demo, name: "dojo_platform_ops_svc" },
+    { ...demo, name: "DOJO_PLATFORM_OPS_SVC" },
     { ...demo, type_desc: "WINDOWS_LOGIN" },
     { ...demo, hasServerPrivileges: true },
   ]) {
@@ -2479,6 +2547,7 @@ test("demo login rename validates identities and names and changes only the sele
     "SA",
     "futon_app",
     "dojo_admin_portal_svc",
+    "dojo_platform_ops_svc",
     "EXISTING_LOGIN",
   ])
     await assert.rejects(rename(name));

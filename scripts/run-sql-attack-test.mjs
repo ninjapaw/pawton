@@ -3,6 +3,18 @@ import {
   sqlAttackRunner,
 } from "../apps/pawton-manufacturing/src/lib/sqlAttackLab.mjs";
 import { labTableInjectionQueries } from "../apps/pawton-manufacturing/src/lib/sqlInjectionProbe.mjs";
+import {
+  CredentialError,
+  applySqlEnvironment,
+} from "./lib/sql-credentials.mjs";
+
+// Scenarios that need CONTROL SERVER. They run as dojo_platform_ops_svc (resolved from Key Vault),
+// never as the built-in administrator, so a targeted attack run never produces an 'sa' sign-in.
+const PRIVILEGED_SCENARIOS = new Set([
+  "principal-anomaly",
+  "external-source",
+  "obfuscated-shell",
+]);
 
 const args = process.argv.slice(2);
 if (args.length === 1 && ["--list", "--audit"].includes(args[0])) {
@@ -42,6 +54,16 @@ if (args.length === 1 && ["--list", "--audit"].includes(args[0])) {
   args[3] === "isolated-lab"
 ) {
   try {
+    // Resolve credentials best-effort: scenario preconditions (feature flags, confirmation
+    // gates) must still report their own errors rather than being masked by a Key Vault lookup.
+    try {
+      await applySqlEnvironment({
+        privileged: PRIVILEGED_SCENARIOS.has(args[1]),
+      });
+    } catch (credentialError) {
+      if (!(credentialError instanceof CredentialError)) throw credentialError;
+      console.error(credentialError.message);
+    }
     const result = await sqlAttackRunner.run(args[1], {
       sourceMode: args[4] === "--source-mode" ? args[5] : "fixed",
       dataMode: args[4] === "--data-mode" ? args[5] : "synthetic",

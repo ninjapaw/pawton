@@ -112,6 +112,10 @@ param userSessionSecret string
 param sqlAdminOpsPassword string
 
 @secure()
+@description('Password for the dojo_platform_ops_svc SQL login used by repository scripts and out-of-band SQL Server administration. Stored only in Key Vault (secret sql-platform-ops-password) and deliberately never published as a Web App app setting, so the public dashboard cannot authenticate as it. Scripts use this login instead of the built-in administrator, which stays disabled and reserved for the enable/disable demo. No default; the deploy script generates a random value per run.')
+param sqlPlatformOpsPassword string
+
+@secure()
 @description('Initial password for the SQL Server built-in administrator login. The deploy script generates it, the VM bootstrap applies it, and Key Vault retains the authoritative current value after portal rotations.')
 param sqlSaLoginPassword string
 
@@ -525,7 +529,7 @@ resource bootstrapExtension 'Microsoft.Compute/virtualMachines/extensions@2024-1
       // neither cmd.exe nor Win32 argv parsing (which powershell.exe uses) treats a single quote
       // as a quote character, so wrapping the value in '...' would pass the literal quote
       // characters through as part of the argument instead of stripping them.
-      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -File Setup-FutonManufacturing.ps1 -AppLoginPasswordBase64 ${base64(sqlAppLoginPassword)} -AdminOpsLoginPasswordBase64 ${base64(sqlAdminOpsPassword)} -SaLoginPasswordBase64 ${base64(sqlSaLoginPassword)} -EnableSqlShellAttackTests ${enableSqlShellAttackTests ? 'true' : 'false'}'
+      commandToExecute: 'powershell -ExecutionPolicy Unrestricted -File Setup-FutonManufacturing.ps1 -AppLoginPasswordBase64 ${base64(sqlAppLoginPassword)} -AdminOpsLoginPasswordBase64 ${base64(sqlAdminOpsPassword)} -PlatformOpsLoginPasswordBase64 ${base64(sqlPlatformOpsPassword)} -SaLoginPasswordBase64 ${base64(sqlSaLoginPassword)} -EnableSqlShellAttackTests ${enableSqlShellAttackTests ? 'true' : 'false'}'
     }
   }
   dependsOn: [
@@ -721,6 +725,14 @@ resource sqlAdminOpsPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01
   }
 }
 
+resource sqlPlatformOpsPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
+  parent: keyVault
+  name: 'sql-platform-ops-password'
+  properties: {
+    value: sqlPlatformOpsPassword
+  }
+}
+
 resource sqlSaLoginUsernameSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
   parent: keyVault
   name: 'sql-sa-login-username'
@@ -908,19 +920,25 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = if (deployWebApp) {
   ]
 }
 
-resource webAppKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployWebApp) {
-  scope: keyVault
-  name: guid(keyVault.id, webAppName, 'kvSecretsUser')
+// The dashboard only ever reads and writes the two built-in-administrator secrets (see
+// src/lib/adminSecrets.mjs), so its identity is granted Key Vault Secrets Officer on exactly
+// those two secrets rather than across the whole vault. Vault-wide access would have let the
+// public web app read 'sql-platform-ops-password' -- the credential reserved for repository
+// scripts and back-end SQL administration -- which is precisely what this scenario keeps out of
+// the GUI's reach.
+resource webAppSaUsernameSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployWebApp) {
+  scope: sqlSaLoginUsernameSecret
+  name: guid(sqlSaLoginUsernameSecret.id, webAppName, 'kvSecretsOfficer')
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')
     principalId: webApp!.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-resource webAppKeyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployWebApp) {
-  scope: keyVault
-  name: guid(keyVault.id, webAppName, 'kvSecretsOfficer')
+resource webAppSaPasswordSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployWebApp) {
+  scope: sqlSaLoginPasswordSecret
+  name: guid(sqlSaLoginPasswordSecret.id, webAppName, 'kvSecretsOfficer')
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')
     principalId: webApp!.identity.principalId

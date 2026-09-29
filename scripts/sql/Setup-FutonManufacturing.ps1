@@ -27,6 +27,12 @@ param(
     [string]$AdminOpsLoginName = 'dojo_admin_portal_svc',
     [Parameter(Mandatory = $true)]
     [string]$AdminOpsLoginPasswordBase64,
+    # Back-end automation identity. Deliberately separate from both the built-in administrator
+    # (which the portal demo enables/disables/renames) and from dojo_admin_portal_svc (whose
+    # password the public Web App holds), so repository scripts never authenticate as 'sa'.
+    [string]$PlatformOpsLoginName = 'dojo_platform_ops_svc',
+    [Parameter(Mandatory = $true)]
+    [string]$PlatformOpsLoginPasswordBase64,
     [Parameter(Mandatory = $true)]
     [string]$SaLoginPasswordBase64,
     [ValidateSet('true', 'false')]
@@ -35,7 +41,8 @@ param(
 
 $AppLoginPassword = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($AppLoginPasswordBase64))
 $AdminOpsLoginPassword = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($AdminOpsLoginPasswordBase64))
-$SaLoginPassword = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($SaLoginPasswordBase64))
+$PlatformOpsLoginPassword = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PlatformOpsLoginPasswordBase64))
+$SaLoginPassword =  [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($SaLoginPasswordBase64))
 
 $ErrorActionPreference = 'Stop'
 $logPath = 'C:\NinjaPawsDojo\bootstrap.log'
@@ -372,6 +379,33 @@ END
 "@
 Invoke-SqlText -Query $adminOpsSql
 Write-Host "Admin portal service login '$AdminOpsLoginName' created/updated (CONTROL SERVER); its password matches the Key Vault secret the dashboard Web App reads."
+
+# 3c. Platform operations service login: the identity repository scripts and any out-of-band SQL
+#     Server administration use. It is created here, its password lives only in Key Vault
+#     ('sql-platform-ops-password'), and it is never published to the Web App's app settings, so
+#     the public dashboard cannot authenticate as it. Scripts previously had no dedicated identity,
+#     which pushed operators toward the built-in 'sa' login -- that login stays disabled and
+#     reserved for the enable/disable demo, and its failed sign-ins stay attributable to the demo
+#     (or to internet scanners) rather than to routine automation.
+$platformOpsPassword = $PlatformOpsLoginPassword
+$platformOpsSql = @"
+USE master;
+IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = '$PlatformOpsLoginName')
+BEGIN
+    CREATE LOGIN [$PlatformOpsLoginName] WITH PASSWORD = N'$platformOpsPassword', CHECK_POLICY = ON, CHECK_EXPIRATION = ON;
+END
+ELSE
+BEGIN
+    ALTER LOGIN [$PlatformOpsLoginName] WITH PASSWORD = N'$platformOpsPassword';
+END
+ALTER LOGIN [$PlatformOpsLoginName] ENABLE;
+IF NOT EXISTS (SELECT 1 FROM sys.server_permissions perm JOIN sys.server_principals prin ON perm.grantee_principal_id = prin.principal_id WHERE prin.name = '$PlatformOpsLoginName' AND perm.permission_name = 'CONTROL SERVER')
+BEGIN
+    GRANT CONTROL SERVER TO [$PlatformOpsLoginName];
+END
+"@
+Invoke-SqlText -Query $platformOpsSql
+Write-Host "Platform operations login '$PlatformOpsLoginName' created/updated (CONTROL SERVER); its password is only in Key Vault and is never sent to the Web App."
 
 # 4. Turn off the SQL Server Browser service; the dojo uses a fixed static port (1433) and does
 #    not need named-instance discovery, which is an unnecessary attack surface on the network.

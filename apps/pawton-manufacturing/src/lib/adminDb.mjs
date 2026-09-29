@@ -1,5 +1,9 @@
 import sql from "mssql";
 import { readSqlConfig } from "./sqlConfig.mjs";
+import {
+  isBuiltInAdminLoginName,
+  isReservedServiceLoginName,
+} from "./sqlIdentities.mjs";
 
 let adminPoolPromise;
 
@@ -183,6 +187,11 @@ export async function rotateSaPassword(newPassword) {
 export async function renameSaLogin(newUsername) {
   const pool = await getAdminPool();
   const currentLogin = await getBuiltInAdminLogin();
+  // The demo may rename the built-in administrator freely, but never onto a service identity:
+  // shadowing futon_app, the portal service login, or the platform operations login would break
+  // authentication and blur which identity a failed sign-in belongs to.
+  if (isReservedServiceLoginName(newUsername))
+    throw new Error("Application service identity: managed by deployment.");
   const quotedNewUsername = quoteIdentifier(newUsername);
   await pool
     .request()
@@ -197,15 +206,9 @@ export function loginRestriction(login, environment = process.env) {
     return "Built-in administrator: use the dedicated controls.";
   if (login.type_desc !== "SQL_LOGIN")
     return "Windows and system identities are read-only.";
-  if (login.name.startsWith("##") || login.name.toLowerCase() === "sa")
+  if (login.name.startsWith("##") || isBuiltInAdminLoginName(login.name))
     return "Reserved SQL identity.";
-  const serviceNames = [
-    environment.SQL_APP_LOGIN || "futon_app",
-    environment.SQL_ADMIN_LOGIN || "dojo_admin_portal_svc",
-  ];
-  if (
-    serviceNames.some((name) => name.toLowerCase() === login.name.toLowerCase())
-  )
+  if (isReservedServiceLoginName(login.name, environment))
     return "Application service identity: managed by deployment.";
   if (login.hasServerPrivileges || login.hasDatabasePrivileges)
     return "Privileged login: manage through SQL Server administration.";

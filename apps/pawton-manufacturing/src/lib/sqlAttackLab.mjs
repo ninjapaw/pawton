@@ -2,6 +2,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import sql from "mssql";
 import { runLabTableInjection } from "./sqlInjectionProbe.mjs";
 import {
+  APP_LOGIN_NAME,
+  PLATFORM_OPS_LOGIN_NAME,
+  isBuiltInAdminLoginName,
+} from "./sqlIdentities.mjs";
+import {
   externalSourceStatement,
   externalSourceTarget,
 } from "./externalSourceProbe.mjs";
@@ -314,13 +319,18 @@ const privilegedScenarios = new Set([
 function connectionConfig(environment, privileged = false) {
   const user = privileged
     ? environment.SQL_ADMIN_LOGIN
-    : environment.SQL_APP_LOGIN || "futon_app";
+    : environment.SQL_APP_LOGIN || APP_LOGIN_NAME;
   const password = privileged
     ? environment.SQL_ADMIN_LOGIN_PASSWORD
     : environment.SQL_APP_LOGIN_PASSWORD;
   if (!environment.SQL_SERVER_HOST || !user || !password)
     throw new SimulationError(
       "This test's SQL connection is not configured.",
+      503,
+    );
+  if (isBuiltInAdminLoginName(user))
+    throw new SimulationError(
+      `This test must not authenticate as the built-in SQL administrator ('${user}'). Configure the ${PLATFORM_OPS_LOGIN_NAME} login from Key Vault instead.`,
       503,
     );
   return {

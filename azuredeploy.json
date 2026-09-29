@@ -226,6 +226,12 @@
         "description": "Password for the dojo_admin_portal_svc SQL login the admin portal uses to enable/disable/rotate the sa login. This login is granted CONTROL SERVER (the only permission SQL Server accepts for altering sa) -- functionally equivalent to sysadmin. Handing a public-facing Web App this credential is itself the anti-pattern this scenario demonstrates; see README.md. No default; the deploy script generates a random value per run."
       }
     },
+    "sqlPlatformOpsPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password for the dojo_platform_ops_svc SQL login used by repository scripts and out-of-band SQL Server administration. Stored only in Key Vault (secret sql-platform-ops-password) and deliberately never published as a Web App app setting, so the public dashboard cannot authenticate as it. Scripts use this login instead of the built-in administrator, which stays disabled and reserved for the enable/disable demo. No default; the deploy script generates a random value per run."
+      }
+    },
     "sqlSaLoginPassword": {
       "type": "securestring",
       "metadata": {
@@ -567,7 +573,7 @@
           ]
         },
         "protectedSettings": {
-          "commandToExecute": "[format('powershell -ExecutionPolicy Unrestricted -File Setup-FutonManufacturing.ps1 -AppLoginPasswordBase64 {0} -AdminOpsLoginPasswordBase64 {1} -SaLoginPasswordBase64 {2} -EnableSqlShellAttackTests {3}', base64(parameters('sqlAppLoginPassword')), base64(parameters('sqlAdminOpsPassword')), base64(parameters('sqlSaLoginPassword')), if(parameters('enableSqlShellAttackTests'), 'true', 'false'))]"
+          "commandToExecute": "[format('powershell -ExecutionPolicy Unrestricted -File Setup-FutonManufacturing.ps1 -AppLoginPasswordBase64 {0} -AdminOpsLoginPasswordBase64 {1} -PlatformOpsLoginPasswordBase64 {2} -SaLoginPasswordBase64 {3} -EnableSqlShellAttackTests {4}', base64(parameters('sqlAppLoginPassword')), base64(parameters('sqlAdminOpsPassword')), base64(parameters('sqlPlatformOpsPassword')), base64(parameters('sqlSaLoginPassword')), if(parameters('enableSqlShellAttackTests'), 'true', 'false'))]"
         }
       },
       "dependsOn": [
@@ -781,6 +787,17 @@
     {
       "type": "Microsoft.KeyVault/vaults/secrets",
       "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', variables('keyVaultResourceName'), 'sql-platform-ops-password')]",
+      "properties": {
+        "value": "[parameters('sqlPlatformOpsPassword')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2024-11-01",
       "name": "[format('{0}/{1}', variables('keyVaultResourceName'), 'sql-sa-login-username')]",
       "properties": {
         "value": "[parameters('sqlSaLoginUsername')]"
@@ -966,15 +983,15 @@
       "condition": "[parameters('deployWebApp')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]",
-      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName')), parameters('webAppName'), 'kvSecretsUser')]",
+      "scope": "[format('Microsoft.KeyVault/vaults/{0}/secrets/{1}', variables('keyVaultResourceName'), 'sql-sa-login-username')]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-username'), parameters('webAppName'), 'kvSecretsOfficer')]",
       "properties": {
-        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
         "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2025-03-01', 'full').identity.principalId]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-username')]",
         "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
       ]
     },
@@ -982,15 +999,15 @@
       "condition": "[parameters('deployWebApp')]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
-      "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]",
-      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName')), parameters('webAppName'), 'kvSecretsOfficer')]",
+      "scope": "[format('Microsoft.KeyVault/vaults/{0}/secrets/{1}', variables('keyVaultResourceName'), 'sql-sa-login-password')]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-password'), parameters('webAppName'), 'kvSecretsOfficer')]",
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
         "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2025-03-01', 'full').identity.principalId]",
         "principalType": "ServicePrincipal"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultResourceName'), 'sql-sa-login-password')]",
         "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
       ]
     },

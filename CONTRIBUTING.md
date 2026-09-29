@@ -23,8 +23,17 @@ The portal test command runs both `scripts/test-admin-portal.mjs` and
 
 These tests use synthetic credentials and mocked SQL operations; they do not contact Azure or
 modify live orders. The audit-template SQL integration test is opt-in and must run only against
-a disposable local SQL Server 2022 container. Set `DOJO_AUDIT_TEST_PORT` to its loopback-mapped
-SQL port and `MSSQL_SA_PASSWORD` to that container's test password, then run
+a disposable local SQL Server 2022 container. No test authenticates as the container's built-in
+administrator; create a dedicated login once the container is up:
+
+```sql
+CREATE LOGIN dojo_test_admin WITH PASSWORD = N'<test-password>', CHECK_POLICY = OFF;
+ALTER SERVER ROLE sysadmin ADD MEMBER dojo_test_admin;
+```
+
+Then set `DOJO_AUDIT_TEST_PORT` to the container's loopback-mapped SQL port and
+`DOJO_TEST_SQL_PASSWORD` to that login's password (override the name with `DOJO_TEST_SQL_LOGIN`
+if you used a different one), and run
 `node --test --test-name-pattern="reusable auditing SQL" scripts/test-admin-portal.mjs`. Remove
 the disposable container afterward and unset both variables; do not point it at a persistent SQL
 instance.

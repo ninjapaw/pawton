@@ -217,11 +217,27 @@ SERVER` to manage the built-in administrator. Compromise of the app or its crede
   portal detects the built-in administrator by SQL Server's fixed SID (`0x01`) rather than
   assuming its name remains `sa`, so it can display the current name, enable/disable it, rotate
   its password, and rename it.
+- **Automation never uses the built-in administrator.** Repository scripts and any out-of-band
+  SQL Server administration authenticate as `dojo_platform_ops_svc`, a separate `CONTROL SERVER`
+  login created during VM bootstrap. Its password exists only in Key Vault as
+  `sql-platform-ops-password` and is deliberately **not** published as a Web App setting, so the
+  public dashboard cannot authenticate as it, and `/users` refuses to enable, disable, rotate,
+  rename, or clear it. Keeping automation off the built-in administrator matters because that
+  login stays disabled between demos: a script that reached for it would generate failed
+  sign-ins, which Microsoft Defender for Cloud reports as *"Failed logon attempt from a
+  potentially harmful application was detected"*. With automation on its own login, those alerts
+  stay attributable to the demo itself or to genuine outside probing of the public SQL endpoint.
+  Scripts resolve credentials with `scripts/lib/sql-credentials.mjs`; set `KEY_VAULT_NAME` (and
+  `SQL_SERVER_HOST`) and it reads the secrets through the Azure CLI. The connection builders also
+  reject the built-in administrator outright, whatever the environment says.
 - **What's protected regardless.** Sign-in requires a random, per-deployment
   `ADMIN_PORTAL_USERNAME`/`ADMIN_PORTAL_PASSWORD`, generated fresh by `scripts/deploy.sh` on
   every deploy. The session cookie is HMAC-signed, `HttpOnly`, `Secure`, `SameSite=Strict`, and
   expires after 15 minutes. The Web App uses its system-assigned managed identity and the Key
-  Vault Secrets Officer role to update the two built-in-administrator secrets.
+  Vault Secrets Officer role to update the two built-in-administrator secrets. That role is
+  assigned on those two secrets individually, not across the vault, so the portal's identity
+  cannot read `sql-platform-ops-password` — the credential reserved for scripts and back-end SQL
+  administration.
 - **Audit coverage.** `SERVER_PRINCIPAL_CHANGE_GROUP` covers login enable/disable/rename;
   `LOGIN_CHANGE_PASSWORD_GROUP` covers password changes; the database specification covers
   `SELECT`/`INSERT`/`UPDATE`/`DELETE`. A "Windows Event confirmation" section on `/admin` runs a
@@ -318,6 +334,8 @@ through your process environment or an approved secret provider, not source cont
 | `SQL_APP_LOGIN_PASSWORD`                         | Required for database access      | Application password                                             |
 | `SQL_ADMIN_LOGIN`                                | Required for admin SQL operations | Privileged identity; deployment supplies `dojo_admin_portal_svc` |
 | `SQL_ADMIN_LOGIN_PASSWORD`                       | Required for admin SQL operations | Privileged SQL password                                          |
+| `KEY_VAULT_NAME`                                 | Required by scripts only          | Vault that scripts read `sql-platform-ops-password` from         |
+| `SQL_PLATFORM_OPS_LOGIN`                         | `dojo_platform_ops_svc`           | Script-only privileged identity; never set on the Web App        |
 | `ADMIN_PORTAL_USERNAME`, `ADMIN_PORTAL_PASSWORD` | Required for sign-in              | Operator credentials                                             |
 | `ADMIN_SESSION_SECRET`                           | Required for sign-in              | HMAC session-signing secret                                      |
 | `LOG_ANALYTICS_WORKSPACE_ID`                     | Optional workspace GUID           | Enables forwarded-event confirmation                             |

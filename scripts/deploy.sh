@@ -625,7 +625,7 @@ read_output() {
 }
 
 run_deployment() {
-    local admin_password sql_app_login_password admin_portal_password admin_session_secret sql_admin_ops_password sql_sa_login_password sql_sa_login_username
+    local admin_password sql_app_login_password admin_portal_password admin_session_secret sql_admin_ops_password sql_platform_ops_password sql_sa_login_password sql_sa_login_username
     local user_portal_password user_session_secret
     local deployment_name output_json vm_principal_id creds_dir creds_file expected_key_vault_name
     admin_password="$(generate_password)"
@@ -634,6 +634,10 @@ run_deployment() {
     user_portal_password="$(generate_password)"
     user_session_secret="$("$NODE_COMMAND" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
     sql_admin_ops_password="$(generate_password)"
+    # Back-end automation credential. Lands in Key Vault only; it is never passed to the Web App,
+    # so repository scripts have an identity to use that is neither the built-in administrator nor
+    # a credential the public dashboard holds.
+    sql_platform_ops_password="$(generate_password)"
     sql_sa_login_password="$(generate_password)"
     expected_key_vault_name="$(printf '%s' "${VM_NAME}kv" | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-24)"
     sql_sa_login_username="$(az keyvault secret show --vault-name "$expected_key_vault_name" --name sql-sa-login-username --query value -o tsv 2>/dev/null || true)"
@@ -660,6 +664,7 @@ run_deployment() {
                      centralWorkspaceName="$CENTRAL_WORKSPACE_NAME" \
                      adminPortalUsername="$ADMIN_PORTAL_USERNAME" adminPortalPassword="$admin_portal_password" \
                      adminSessionSecret="$admin_session_secret" sqlAdminOpsPassword="$sql_admin_ops_password" \
+                     sqlPlatformOpsPassword="$sql_platform_ops_password" \
                      userPortalUsername="$USER_PORTAL_USERNAME" userPortalPassword="$user_portal_password" \
                      userSessionSecret="$user_session_secret" \
                      sqlSaLoginUsername="$sql_sa_login_username" sqlSaLoginPassword="$sql_sa_login_password"
@@ -727,7 +732,7 @@ run_deployment() {
         printf 'Generated:             %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$admin_portal_creds_file"
     chmod 600 "$admin_portal_creds_file" 2>/dev/null || true
-    unset admin_portal_password sql_admin_ops_password admin_session_secret
+    unset admin_portal_password sql_admin_ops_password sql_platform_ops_password admin_session_secret
     warn "Admin portal credentials saved to $admin_portal_creds_file — treat it as a secret and delete it once you finish the exercise."
     record_check "Admin portal credentials saved locally" pass "Written to $admin_portal_creds_file (not committed; output/ is gitignored). This account can enable/disable/rotate the sa login from the dashboard -- delete this file when the exercise ends."
 
@@ -736,6 +741,7 @@ run_deployment() {
             record_check "Manager credentials stored in Key Vault" pass "Secrets 'user-portal-username', 'user-portal-password', and 'user-session-secret' in $KEY_VAULT_NAME. Sign in at /login; retrieve credentials using authorized Key Vault access. No local manager credential file is created."
         fi
         record_check "futon_app SQL login password stored in Key Vault" pass "Secret 'sql-app-login-password' in $KEY_VAULT_NAME; retrieve with 'az keyvault secret show --vault-name $KEY_VAULT_NAME --name sql-app-login-password'."
+        record_check "dojo_platform_ops_svc SQL login password stored in Key Vault" pass "Secret 'sql-platform-ops-password' in $KEY_VAULT_NAME. Repository scripts resolve this login from Key Vault instead of using the built-in administrator; it is intentionally NOT published as a Web App app setting, so the public dashboard cannot authenticate as it."
         record_check "VM admin credentials stored in Key Vault" pass "Secrets 'vm-admin-username' and 'vm-admin-password' in $KEY_VAULT_NAME; retrieve them with 'az keyvault secret show --vault-name $KEY_VAULT_NAME --name <secret-name>'."
         record_check "Built-in SQL administrator credentials stored in Key Vault" pass "Secrets 'sql-sa-login-username' and 'sql-sa-login-password' in $KEY_VAULT_NAME; the portal updates them after a rename or password rotation."
     fi
