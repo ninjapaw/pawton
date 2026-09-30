@@ -15,7 +15,7 @@ const defender = await getDefenderStatus();
 const availability: { ids: string[]; reason: string | null } = await sqlAttackRunner.availability();
 const runnable = (scenario?: string) => Boolean(scenario && walkthroughRunnableScenarios.includes(scenario) && availability.ids.includes(scenario));
 const sqlPlan = defender.observations.find((observation) => observation.label === 'Defender for SQL on machines');
-const protectedNow = sqlPlan?.state === 'Standard';
+const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Free' ? 'off' : 'unverified';
 ---
 <Layout title="Defender for SQL walkthrough">
   <dialog class="kickoff" id="kickoff" data-open={kickoff ? 'true' : 'false'} aria-labelledby="kickoff-title">
@@ -36,10 +36,10 @@ const protectedNow = sqlPlan?.state === 'Standard';
     <p>Follow one attack from first probe to operating-system takeover, and see at each step why detection at the database layer matters.</p>
   </header>
 
-  <div class={protectedNow ? 'ok' : 'warn'} role="status">
-    {protectedNow
-      ? <>Live check: <strong>Defender for SQL on machines is enabled</strong> on this subscription, so the live steps below can produce real alerts.</>
-      : <>Live check: Defender for SQL on machines reports <strong>{sqlPlan?.state ?? 'Unavailable'}</strong>. The story still works, but the live steps won't produce Defender alerts until the plan is Standard.</>}
+  <div class={planState === 'on' ? 'ok' : 'warn'} role="status">
+    {planState === 'on' && <>Live check: <strong>Defender for SQL on machines is enabled</strong> on this subscription, so the live steps below can produce real alerts.</>}
+    {planState === 'off' && <>Live check: <strong>Defender for SQL on machines is off</strong> (Free tier) on this subscription. The story still works, but the live steps won't produce Defender alerts until an administrator enables the plan in Defender for Cloud.</>}
+    {planState === 'unverified' && <>Live check: <strong>the Defender for SQL plan status couldn't be verified</strong> from this app{sqlPlan?.detail ? <> ({sqlPlan.detail.replace(/\.$/, '')})</> : null}. This doesn't mean the plan is off. The story still works, and the live steps will produce alerts if the plan is enabled; confirm in Defender for Cloud → Environment settings.</>}
   </div>
 
   <div class="wt-progress" aria-hidden="true"><span id="wt-progress-bar"></span></div>
