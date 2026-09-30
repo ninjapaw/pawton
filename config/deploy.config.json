@@ -50,6 +50,7 @@
     "cloudflareZoneId": "",
     "adminPortalUsername": "dojo-admin",
     "userPortalUsername": "dojo-manager",
+    "walkthroughPortalUsername": "dojo-guide",
     "workspaceRetentionDays": "30",
     "sentinelMode": "new",
     "sentinelResourceGroup": "",

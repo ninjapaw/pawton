@@ -1,0 +1,11 @@
+---
+import { segments } from '../lib/walkthroughStory.mjs';
+
+// Renders story text, turning {{glossary}} tokens into keyboard-focusable tooltips.
+interface Props { text: string; id: string }
+const { text, id } = Astro.props;
+const parts = segments(text);
+---
+{parts.map((part, index) => part.definition
+  ? <span class="term" tabindex="0" aria-describedby={`${id}-tip-${index}`}>{part.text}<span class="term-tip" role="tooltip" id={`${id}-tip-${index}`}><strong>{part.text}</strong> {part.definition}</span></span>
+  : part.text)}

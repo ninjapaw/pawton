@@ -8,6 +8,7 @@ import {
   getAuthenticatedUsername,
   verifyAdminCredentials,
 } from "./adminAuth.mjs";
+import { verifyWalkthroughCredentials } from "./walkthroughAuth.mjs";
 
 export const USER_SESSION_COOKIE = "dojo_user_session";
 const sessionSeconds = 15 * 60;
@@ -102,9 +103,11 @@ function checkLoginCredentials(request, username, password, allowAdmin) {
   const managerMatches =
     isUserLoginConfigured() && userMatches && passwordMatches;
   const adminMatches = allowAdmin && verifyAdminCredentials(username, password);
-  if (managerMatches || adminMatches) {
+  const guideMatches =
+    allowAdmin && verifyWalkthroughCredentials(username, password);
+  if (managerMatches || adminMatches || guideMatches) {
     attempts.delete(key);
-    return managerMatches ? "success" : "admin";
+    return managerMatches ? "success" : adminMatches ? "admin" : "walkthrough";
   }
   attempts.set(key, {
     count: (entry?.count ?? 0) + 1,

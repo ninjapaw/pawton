@@ -2,9 +2,11 @@
 import Layout from '../layouts/Layout.astro';
 import { getUser, isUserLoginConfigured } from '../lib/userAuth.mjs';
 import { isAuthenticated, isAdminPortalConfigured } from '../lib/adminAuth.mjs';
+import { getWalkthroughUser, isWalkthroughLoginConfigured } from '../lib/walkthroughAuth.mjs';
 if (isAuthenticated(Astro.cookies)) return Astro.redirect('/admin');
 if (getUser(Astro.cookies)) return Astro.redirect('/orders');
-const configured = isUserLoginConfigured() || isAdminPortalConfigured();
+if (getWalkthroughUser(Astro.cookies)) return Astro.redirect('/walkthrough');
+const configured = isUserLoginConfigured() || isAdminPortalConfigured() || isWalkthroughLoginConfigured();
 const messages: Record<string, string> = {
   invalid: 'Invalid username or password.',
   ratelimited: 'Too many attempts. Try again in 15 minutes.',

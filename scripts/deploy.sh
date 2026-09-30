@@ -174,6 +174,9 @@ fi
 ADMIN_PORTAL_USERNAME="$(config_setting adminPortalUsername "dojo-admin")"
 USER_PORTAL_USERNAME="${USER_PORTAL_USERNAME:-$(config_setting userPortalUsername 'dojo-manager')}"
 [[ "$USER_PORTAL_USERNAME" =~ ^[A-Za-z0-9_.@-]{1,100}$ ]] || fail 'userPortalUsername must contain 1-100 letters, digits, dots, underscores, @ signs, or hyphens.'
+WALKTHROUGH_PORTAL_USERNAME="${WALKTHROUGH_PORTAL_USERNAME:-$(config_setting walkthroughPortalUsername 'dojo-guide')}"
+[[ "$WALKTHROUGH_PORTAL_USERNAME" =~ ^[A-Za-z0-9_.@-]{1,100}$ ]] || fail 'walkthroughPortalUsername must contain 1-100 letters, digits, dots, underscores, @ signs, or hyphens.'
+[[ "$WALKTHROUGH_PORTAL_USERNAME" != "$USER_PORTAL_USERNAME" ]] || fail 'walkthroughPortalUsername must differ from userPortalUsername.'
 CENTRAL_WORKSPACE_RESOURCE_GROUP="$(config_setting centralWorkspaceResourceGroup "NP-Sentinel-CentralUS")"
 CENTRAL_WORKSPACE_NAME="$(config_setting centralWorkspaceName "log-np-sentinel-centralus")"
 CENTRAL_WORKSPACE_RETENTION_DAYS="$(config_setting workspaceRetentionDays 30)"
@@ -624,6 +627,7 @@ ${BLUE}Pawton Manufacturing Web App:${NC} $WEB_APP_NAME ($WEB_APP_PLAN_SKU, depl
 ${BLUE}Web App network path:${NC} private regional VNet integration to the SQL VM subnet
 ${BLUE}Portal custom domain:${NC} ${WEB_APP_CUSTOM_DOMAIN:-not configured} (manageCustomDomain=$MANAGE_CUSTOM_DOMAIN, Cloudflare DNS-only)
 ${BLUE}Manager sign-in:${NC} $USER_PORTAL_USERNAME (password and session key generated during deploy, stored in Key Vault)
+${BLUE}Walkthrough guide sign-in:${NC} $WALKTHROUGH_PORTAL_USERNAME (signing in at /login starts the Defender for SQL story at /walkthrough; password stored in Key Vault)
 
 EOF
 }
@@ -728,12 +732,13 @@ read_output() {
 
 run_deployment() {
     local admin_password sql_app_login_password admin_portal_password admin_session_secret sql_admin_ops_password sql_platform_ops_password sql_sa_login_password sql_sa_login_username
-    local user_portal_password user_session_secret
+    local user_portal_password user_session_secret walkthrough_portal_password
     local deployment_name output_json vm_principal_id creds_dir creds_file expected_key_vault_name
     admin_password="$(generate_password)"
     sql_app_login_password="$(generate_password)"
     admin_portal_password="$(generate_password)"
     user_portal_password="$(generate_password)"
+    walkthrough_portal_password="$(generate_password)"
     user_session_secret="$("$NODE_COMMAND" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
     sql_admin_ops_password="$(generate_password)"
     # Back-end automation credential. Lands in Key Vault only; it is never passed to the Web App,
@@ -769,6 +774,7 @@ run_deployment() {
                      sqlPlatformOpsPassword="$sql_platform_ops_password" \
                      userPortalUsername="$USER_PORTAL_USERNAME" userPortalPassword="$user_portal_password" \
                      userSessionSecret="$user_session_secret" \
+                     walkthroughPortalUsername="$WALKTHROUGH_PORTAL_USERNAME" walkthroughPortalPassword="$walkthrough_portal_password" \
                      sqlSaLoginUsername="$sql_sa_login_username" sqlSaLoginPassword="$sql_sa_login_password"
     )
     # Safety check: run what-if with ResourceIdOnly format to suppress property diffs that could expose
@@ -787,6 +793,7 @@ run_deployment() {
     # Clear the deployment parameters from the environment to avoid keeping sensitive values in memory longer than needed.
     unset deployment_parameters
     unset user_portal_password user_session_secret
+    unset walkthrough_portal_password
     ok "Infrastructure deployed."
     update_status "Infrastructure deployed" "Bicep deployment finished. Capturing outputs and credentials." 42
 
@@ -841,6 +848,7 @@ run_deployment() {
     if [[ -n "$KEY_VAULT_NAME" ]]; then
         if [[ "$DEPLOY_WEB_APP" == true ]]; then
             record_check "Manager credentials stored in Key Vault" pass "Secrets 'user-portal-username', 'user-portal-password', and 'user-session-secret' in $KEY_VAULT_NAME. Sign in at /login; retrieve credentials using authorized Key Vault access. No local manager credential file is created."
+            record_check "Walkthrough guide credentials stored in Key Vault" pass "Secrets 'walkthrough-portal-username' and 'walkthrough-portal-password' in $KEY_VAULT_NAME. Sign in at /login as the guide to start the Defender for SQL walkthrough; the guide account can only view the story and run its three unprivileged tests."
         fi
         record_check "futon_app SQL login password stored in Key Vault" pass "Secret 'sql-app-login-password' in $KEY_VAULT_NAME; retrieve with 'az keyvault secret show --vault-name $KEY_VAULT_NAME --name sql-app-login-password'."
         record_check "dojo_platform_ops_svc SQL login password stored in Key Vault" pass "Secret 'sql-platform-ops-password' in $KEY_VAULT_NAME. Repository scripts resolve this login from Key Vault instead of using the built-in administrator; it is intentionally NOT published as a Web App app setting, so the public dashboard cannot authenticate as it."
@@ -1084,6 +1092,14 @@ run_verification() {
             record_check "Manager credential secret metadata verified" pass "All three manager secrets exist and are enabled in $KEY_VAULT_NAME. Values were not read or logged by this check."
         else
             record_check "Manager credential secret metadata verified" unknown "Could not confirm all enabled manager secrets in $KEY_VAULT_NAME. Verify Key Vault access and deployment results."
+        fi
+        local walkthrough_secret_count
+        walkthrough_secret_count="$(az keyvault secret list --vault-name "$KEY_VAULT_NAME" \
+            --query "length([?(name=='walkthrough-portal-username' || name=='walkthrough-portal-password') && attributes.enabled])" -o tsv 2>/dev/null || true)"
+        if [[ "$walkthrough_secret_count" == 2 ]]; then
+            record_check "Walkthrough guide secret metadata verified" pass "Both walkthrough guide secrets exist and are enabled in $KEY_VAULT_NAME. Values were not read or logged by this check."
+        else
+            record_check "Walkthrough guide secret metadata verified" unknown "Could not confirm both enabled walkthrough guide secrets in $KEY_VAULT_NAME. Verify Key Vault access and deployment results."
         fi
     fi
 

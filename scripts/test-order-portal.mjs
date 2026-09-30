@@ -209,6 +209,7 @@ test("shared login issues only the matching role's session and rejects invalid r
       SESSION_COOKIE_NAME,
       ROTATED_SECRET_COOKIE_NAME,
       USER_SESSION_COOKIE,
+      "dojo_walkthrough_session",
     ]);
     assert.equal(result.values.get(cookie).settings.secure, true);
     assert.equal(result.values.get(cookie).settings.httpOnly, true);

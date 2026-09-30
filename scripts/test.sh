@@ -56,6 +56,7 @@ echo "Checking Node.js runtime syntax..."
     "$NODE_COMMAND" --check scripts/lib/sql-credentials.mjs
     "$NODE_COMMAND" --check scripts/serve-external-source-canary.mjs
     "$NODE_COMMAND" --check scripts/verify-unique-canary.mjs
+    "$NODE_COMMAND" --check scripts/test-walkthrough.mjs
     "$NODE_COMMAND" scripts/test-sentinel-sql.mjs
     "$NODE_COMMAND" --test scripts/test-pawton-domain.mjs
 )

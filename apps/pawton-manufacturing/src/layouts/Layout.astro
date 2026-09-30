@@ -3,10 +3,12 @@ const { title = 'Overview' } = Astro.props;
 const DEFAULT_THEME = 'dark';
 import { getAuthenticatedUsername } from '../lib/adminAuth.mjs';
 import { getUser } from '../lib/userAuth.mjs';
+import { getWalkthroughUser } from '../lib/walkthroughAuth.mjs';
 import { pageMetadata, SITE_NAME } from '../lib/pageMetadata.mjs';
 
 const adminUsername = getAuthenticatedUsername(Astro.cookies);
 const staffUsername = getUser(Astro.cookies);
+const guideUsername = adminUsername ? null : getWalkthroughUser(Astro.cookies);
 const metadata = pageMetadata(Astro.url.pathname, title);
 Astro.response.headers.set('Cache-Control', 'private, no-store');
 ---
@@ -169,10 +171,17 @@ Astro.response.headers.set('Cache-Control', 'private, no-store');
           <a href="/admin">Security lab</a>
           <a href="/admin/schema">Schema</a>
           <a href="/admin/auditing">Auditing</a>
+          <a href="/walkthrough">Walkthrough</a>
           <span class="user-chip" title={`Signed in as ${adminUsername}`}>{adminUsername}</span>
           <form class="logout-form" method="post" action="/api/admin/logout">
             <button class="nav-action" type="submit">Logout</button>
           </form>
+        </>
+      ) : guideUsername ? (
+        <>
+          <a href="/walkthrough">Walkthrough</a>
+          <span class="user-chip" title={`Walkthrough guide: ${guideUsername}`}>{guideUsername}</span>
+          <form class="logout-form" method="post" action="/api/walkthrough/logout"><button class="nav-action" type="submit">Sign out</button></form>
         </>
       ) : (
         <>

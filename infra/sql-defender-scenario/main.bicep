@@ -107,6 +107,16 @@ param userPortalPassword string
 @description('Manager session-signing key. Generated independently from the admin key and stored in Key Vault.')
 param userSessionSecret string
 
+@minLength(1)
+@maxLength(100)
+@description('Guide account that starts the Defender for SQL walkthrough. It can only view the story and run the three unprivileged walkthrough tests; it has no order, SQL login, or Security lab access.')
+param walkthroughPortalUsername string = 'dojo-guide'
+
+@secure()
+@minLength(16)
+@description('Walkthrough guide password. Generated on full deployment and stored in Key Vault; separate from administrator, manager, and SQL credentials.')
+param walkthroughPortalPassword string
+
 @secure()
 @description('Password for the dojo_admin_portal_svc SQL login the admin portal uses to enable/disable/rotate the sa login. This login is granted CONTROL SERVER (the only permission SQL Server accepts for altering sa) -- functionally equivalent to sysadmin. Handing a public-facing Web App this credential is itself the anti-pattern this scenario demonstrates; see README.md. No default; the deploy script generates a random value per run.')
 param sqlAdminOpsPassword string
@@ -717,6 +727,22 @@ resource userSessionSecretSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' 
   }
 }
 
+resource walkthroughPortalUsernameSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = if (deployWebApp) {
+  parent: keyVault
+  name: 'walkthrough-portal-username'
+  properties: {
+    value: walkthroughPortalUsername
+  }
+}
+
+resource walkthroughPortalPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = if (deployWebApp) {
+  parent: keyVault
+  name: 'walkthrough-portal-password'
+  properties: {
+    value: walkthroughPortalPassword
+  }
+}
+
 resource sqlAdminOpsPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2024-11-01' = {
   parent: keyVault
   name: 'sql-admin-ops-password'
@@ -856,6 +882,14 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = if (deployWebApp) {
         {
           name: 'USER_SESSION_SECRET'
           value: userSessionSecret
+        }
+        {
+          name: 'WALKTHROUGH_PORTAL_USERNAME'
+          value: walkthroughPortalUsername
+        }
+        {
+          name: 'WALKTHROUGH_PORTAL_PASSWORD'
+          value: walkthroughPortalPassword
         }
         {
           name: 'SQL_ADMIN_LOGIN'

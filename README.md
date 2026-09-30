@@ -192,6 +192,32 @@ The deployment script uploads the portal source after infrastructure provisionin
 Azure's remote build service. See [portal setup and configuration](#portal-setup-and-configuration)
 for local development and prebuilt deployment requirements.
 
+## Guided walkthrough: why Defender for SQL
+
+Sign in at `/login` as the **walkthrough guide** (`dojo-guide` by default) and the site opens a
+self-guided story at `/walkthrough`. A fictional attacker, Ghostpaw, goes after Pawton's SQL
+Server in five acts: brute force, a known attack tool, SQL injection through the app, a
+rarely-seen principal, and an obfuscated operating-system shell. Each act shows, side by side,
+what a team *without* Defender for SQL would see (raw log lines) and the Defender for SQL alert
+that fires instead, with its official name, alert type, severity, and MITRE tactic. Dotted terms
+have hover and keyboard tooltips, and a debrief compares the two outcomes, shows the live
+Defender plan status, and states plainly what Defender for SQL does *not* do: it detects and
+alerts, it doesn't block inline.
+
+The guide is a least-privilege presenter account:
+
+- It can view only the walkthrough. It has no access to orders, SQL logins, `sa`, or any Security
+  lab setting.
+- It can run just the three unprivileged acts live (brute force, harmful application, and
+  synthetic SQL injection). These use the `futon_app` login and the shared attack cooldown, and
+  the page then polls Defender for Cloud for a matching alert for up to 10 minutes.
+- Acts 4 and 5 need the privileged `dojo_admin_portal_svc` login, so they stay narrative for the
+  guide. An administrator can open the same walkthrough and jump to the Security lab to run them.
+
+Deployment generates the guide password and stores it in Key Vault as
+`walkthrough-portal-password` (username in `walkthrough-portal-username`). Change the username
+with `sqlScenario.walkthroughPortalUsername` in `config/deploy.config.json`.
+
 ## Admin portal: a deliberate anti-pattern, not a template
 
 `xp_cmdshell` defaults to enabled for shell attack exercises. Set
@@ -342,6 +368,7 @@ through your process environment or an approved secret provider, not source cont
 | `SQL_PLATFORM_OPS_LOGIN`                         | `dojo_platform_ops_svc`           | Script-only privileged identity; never set on the Web App        |
 | `ADMIN_PORTAL_USERNAME`, `ADMIN_PORTAL_PASSWORD` | Required for sign-in              | Operator credentials                                             |
 | `ADMIN_SESSION_SECRET`                           | Required for sign-in              | HMAC session-signing secret                                      |
+| `WALKTHROUGH_PORTAL_USERNAME`, `WALKTHROUGH_PORTAL_PASSWORD` | Optional; deployment supplies `dojo-guide` | Guide account that starts the Defender for SQL walkthrough; also needs `USER_SESSION_SECRET` |
 | `LOG_ANALYTICS_WORKSPACE_ID`                     | Optional workspace GUID           | Enables forwarded-event confirmation                             |
 | `SQL_VM_RESOURCE_ID`                             | Set by deployment                 | Fixed VM scope for evidence and extension reads                  |
 | `AZURE_SUBSCRIPTION_ID`                          | Set by deployment                 | Read-only Defender plan queries                                  |

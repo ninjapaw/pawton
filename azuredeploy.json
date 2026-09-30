@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "17406478437747612630"
+      "templateHash": "1828330679729186402"
     }
   },
   "parameters": {
@@ -218,6 +218,22 @@
       "minLength": 64,
       "metadata": {
         "description": "Manager session-signing key. Generated independently from the admin key and stored in Key Vault."
+      }
+    },
+    "walkthroughPortalUsername": {
+      "type": "string",
+      "defaultValue": "dojo-guide",
+      "minLength": 1,
+      "maxLength": 100,
+      "metadata": {
+        "description": "Guide account that starts the Defender for SQL walkthrough. It can only view the story and run the three unprivileged walkthrough tests; it has no order, SQL login, or Security lab access."
+      }
+    },
+    "walkthroughPortalPassword": {
+      "type": "securestring",
+      "minLength": 16,
+      "metadata": {
+        "description": "Walkthrough guide password. Generated on full deployment and stored in Key Vault; separate from administrator, manager, and SQL credentials."
       }
     },
     "sqlAdminOpsPassword": {
@@ -774,6 +790,30 @@
       ]
     },
     {
+      "condition": "[parameters('deployWebApp')]",
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', variables('keyVaultResourceName'), 'walkthrough-portal-username')]",
+      "properties": {
+        "value": "[parameters('walkthroughPortalUsername')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployWebApp')]",
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2024-11-01",
+      "name": "[format('{0}/{1}', variables('keyVaultResourceName'), 'walkthrough-portal-password')]",
+      "properties": {
+        "value": "[parameters('walkthroughPortalPassword')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultResourceName'))]"
+      ]
+    },
+    {
       "type": "Microsoft.KeyVault/vaults/secrets",
       "apiVersion": "2024-11-01",
       "name": "[format('{0}/{1}', variables('keyVaultResourceName'), 'sql-admin-ops-password')]",
@@ -920,6 +960,14 @@
             {
               "name": "USER_SESSION_SECRET",
               "value": "[parameters('userSessionSecret')]"
+            },
+            {
+              "name": "WALKTHROUGH_PORTAL_USERNAME",
+              "value": "[parameters('walkthroughPortalUsername')]"
+            },
+            {
+              "name": "WALKTHROUGH_PORTAL_PASSWORD",
+              "value": "[parameters('walkthroughPortalPassword')]"
             },
             {
               "name": "SQL_ADMIN_LOGIN",

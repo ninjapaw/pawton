@@ -1,0 +1,356 @@
+---
+import Layout from '../layouts/Layout.astro';
+import StoryText from '../components/StoryText.astro';
+import { getWalkthroughViewer } from '../lib/walkthroughAuth.mjs';
+import { chapters, valueComparison, honestLimits, alertReference, pricingReference, walkthroughRunnableScenarios } from '../lib/walkthroughStory.mjs';
+import { getDefenderStatus } from '../lib/defenderStatus.mjs';
+import { sqlAttackRunner } from '../lib/sqlAttackLab.mjs';
+
+const viewer = getWalkthroughViewer(Astro.cookies);
+if (!viewer) return Astro.redirect('/login');
+Astro.response.headers.set('Cache-Control', 'no-store');
+
+const kickoff = Astro.url.searchParams.get('kickoff') === '1';
+const defender = await getDefenderStatus();
+const availability: { ids: string[]; reason: string | null } = await sqlAttackRunner.availability();
+const runnable = (scenario?: string) => Boolean(scenario && walkthroughRunnableScenarios.includes(scenario) && availability.ids.includes(scenario));
+const sqlPlan = defender.observations.find((observation) => observation.label === 'Defender for SQL on machines');
+const protectedNow = sqlPlan?.state === 'Standard';
+---
+<Layout title="Defender for SQL walkthrough">
+  <dialog class="kickoff" id="kickoff" data-open={kickoff ? 'true' : 'false'} aria-labelledby="kickoff-title">
+    <p class="eyebrow">Mission briefing</p>
+    <h2 id="kickoff-title">Welcome, {viewer.name}. Your shift is starting.</h2>
+    <p>Tonight, a fictional attacker called <strong>Ghostpaw</strong> goes after Pawton Manufacturing's SQL Server in five moves. For each move you'll see what a team <em>without</em> Defender for SQL would notice, and what Defender for SQL reports instead.</p>
+    <ul>
+      <li><strong>Three moves are live.</strong> They run real, bounded activity against this lab's SQL Server and then watch for a matching Defender alert.</li>
+      <li><strong>Dotted terms have tooltips.</strong> Hover over or focus them for a plain-language definition.</li>
+      <li><strong>Everything is safe.</strong> No real account is guessed, no business data is changed, and nothing downloaded is executed.</li>
+    </ul>
+    <div class="actions"><button type="button" id="kickoff-start">Begin the story</button></div>
+  </dialog>
+
+  <header class="page-header">
+    <p class="eyebrow">Guided story · Defender for SQL</p>
+    <h1>The night Ghostpaw came for Pawton's database</h1>
+    <p>Follow one attack from first probe to operating-system takeover, and see at each step why detection at the database layer matters.</p>
+  </header>
+
+  <div class={protectedNow ? 'ok' : 'warn'} role="status">
+    {protectedNow
+      ? <>Live check: <strong>Defender for SQL on machines is enabled</strong> on this subscription, so the live steps below can produce real alerts.</>
+      : <>Live check: Defender for SQL on machines reports <strong>{sqlPlan?.state ?? 'Unavailable'}</strong>. The story still works, but the live steps won't produce Defender alerts until the plan is Standard.</>}
+  </div>
+
+  <div class="wt-progress" aria-hidden="true"><span id="wt-progress-bar"></span></div>
+  <nav class="wt-stepper" aria-label="Walkthrough chapters">
+    <ol>{chapters.map((chapter, index) => <li><button type="button" class="wt-step" data-step={index} aria-controls={`chapter-${chapter.id}`}><span class="wt-step-num">{index === 0 ? '▶' : index === chapters.length - 1 ? '✓' : index}</span><span class="wt-step-label">{chapter.kind === 'attack' ? chapter.act?.split(' · ')[1] : chapter.title.split(':')[0]}</span></button></li>)}</ol>
+  </nav>
+
+  {chapters.map((chapter, index) => (
+    <section class="wt-chapter" id={`chapter-${chapter.id}`} data-chapter={index} hidden={index !== 0} aria-labelledby={`title-${chapter.id}`}>
+      <p class="wt-clock">{chapter.clock}{chapter.act && <> · {chapter.act}</>}</p>
+      <h2 id={`title-${chapter.id}`}>{chapter.title}</h2>
+
+      {chapter.kind === 'briefing' && <>
+        <p class="wt-lead"><StoryText id={`${chapter.id}-lead`} text={chapter.lead!} /></p>
+        {chapter.story!.map((paragraph, p) => <p><StoryText id={`${chapter.id}-s${p}`} text={paragraph} /></p>)}
+        <div class="wt-callout"><strong>The question:</strong> {chapter.takeaway}</div>
+        <div class="grid">
+          <article class="card"><h3>What's at stake</h3><p>Customer accounts, negotiated prices, orders, and shipments, all on one SQL Server VM.</p></article>
+          <article class="card"><h3>The attacker</h3><p>Ghostpaw: opportunistic, patient, and fictional. Uses public tools and common techniques.</p></article>
+          <article class="card"><h3>Your tools</h3><p>SQL logs and auditing, plus <StoryText id="brief-tools" text="{{defender}} and {{sentinel}}." /></p></article>
+        </div>
+      </>}
+
+      {chapter.kind === 'attack' && <>
+        <div class="wt-attacker"><span class="wt-tag">Ghostpaw's move</span><p><StoryText id={`${chapter.id}-atk`} text={chapter.attacker!} /></p></div>
+        <div class="wt-compare">
+          <article class="wt-side wt-without">
+            <span class="wt-tag">Without Defender for SQL</span>
+            <h3>{chapter.without!.headline}</h3>
+            <p><StoryText id={`${chapter.id}-wo`} text={chapter.without!.detail} /></p>
+            <pre aria-label="Illustrative log excerpt"><code>{chapter.without!.evidence}</code></pre>
+            <p class="wt-fine">Illustrative excerpt.</p>
+          </article>
+          <article class="wt-side wt-with">
+            <span class="wt-tag">With Defender for SQL</span>
+            <div class="wt-alert">
+              <div class="wt-alert-head"><span class={`wt-sev wt-sev-${chapter.with!.severity.split('/')[0].toLowerCase()}`}>{chapter.with!.severity}</span><span class="wt-alert-title">{chapter.with!.alert}</span></div>
+              <dl>
+                <dt>Alert type</dt><dd><code>{chapter.with!.alertType}</code></dd>
+                <dt><StoryText id={`${chapter.id}-mt`} text="{{mitre}}" /></dt><dd>{chapter.with!.tactic}</dd>
+              </dl>
+            </div>
+            <p>{chapter.with!.detail}</p>
+            <p class="wt-fine">Alert name, type, severity, and tactic from the <a href={alertReference} target="_blank" rel="noopener noreferrer">Microsoft alert reference</a>.</p>
+          </article>
+        </div>
+        <h3>Why it matters</h3>
+        <p><StoryText id={`${chapter.id}-why`} text={chapter.why!} /></p>
+        <h3>What would have stopped or slowed this</h3>
+        <ul class="wt-controls">{chapter.controls!.map((control, c) => <li><StoryText id={`${chapter.id}-c${c}`} text={control} /></li>)}</ul>
+
+        <div class="wt-live">
+          <span class="wt-tag">Try it live</span>
+          {chapter.live && runnable(chapter.scenario) && (
+            <form class="wt-run-form" method="post" action="/api/walkthrough/run">
+              <input type="hidden" name="scenario" value={chapter.scenario} />
+              <p>{chapter.live.summary}</p>
+              <p class="wt-fine">{chapter.live.note}</p>
+              <label class="confirmation"><input type="checkbox" name="confirm" value="yes" required />I understand this runs real, bounded activity against the lab SQL Server</label>
+              <div class="actions"><button type="submit">Run Ghostpaw's move</button></div>
+              <div class="wt-result" role="status" aria-live="polite" hidden></div>
+            </form>
+          )}
+          {chapter.live && !runnable(chapter.scenario) && <p>Live run unavailable: {availability.reason ?? 'this test is not configured on this environment.'}</p>}
+          {chapter.adminOnly && <>
+            <p>{chapter.adminOnly}</p>
+            {viewer.role === 'admin' && <p><a class="pill" href={`/admin#attack-${chapter.scenario}`}>Run it in the Security lab</a></p>}
+          </>}
+        </div>
+
+        <details class="wt-presenter"><summary>Presenter note</summary><p>{chapter.presenter}</p></details>
+      </>}
+
+      {chapter.kind === 'debrief' && <>
+        <p class="wt-lead"><StoryText id="debrief-lead" text={chapter.lead!} /></p>
+        <div class="table-shell"><table>
+          <thead><tr><th scope="col">Question</th><th scope="col">Without Defender for SQL</th><th scope="col">With Defender for SQL</th></tr></thead>
+          <tbody>{valueComparison.map((row) => <tr><th scope="row">{row.question}</th><td>{row.without}</td><td>{row.with}</td></tr>)}</tbody>
+        </table></div>
+
+        <h3>Is Pawton protected right now?</h3>
+        <div class="grid">{defender.observations.map((observation) => <article class="card"><h3>{observation.label}</h3><span class="badge">{observation.state}</span><p>{observation.detail}</p></article>)}</div>
+
+        <h3>What Defender for SQL doesn't do</h3>
+        <ul class="wt-controls">{honestLimits.map((limit) => <li>{limit}</li>)}</ul>
+
+        <h3>The case in one sentence</h3>
+        <div class="wt-callout">Every move tonight left evidence in the logs, but only Defender for SQL turned that evidence into a prioritized, explained alert while there was still time to act. Weigh the per-server plan cost on the <a href={pricingReference} target="_blank" rel="noopener noreferrer">Defender for Cloud pricing page</a> against a single missed night like this one.</div>
+
+        <div class="actions">
+          <button type="button" class="secondary" id="wt-restart">Start the story again</button>
+          {viewer.role === 'admin' && <><a class="pill" href="/admin">Open the Security lab</a><a class="pill" href="/admin/auditing">Review SQL audit evidence</a></>}
+          <a class="pill" href={alertReference} target="_blank" rel="noopener noreferrer">All SQL alert types</a>
+        </div>
+      </>}
+    </section>
+  ))}
+
+  <div class="wt-nav">
+    <button type="button" class="secondary" id="wt-prev">← Previous</button>
+    <span id="wt-position" aria-live="polite"></span>
+    <button type="button" id="wt-next">Next →</button>
+  </div>
+
+  <script>
+    const storageKey = 'pawton-walkthrough-step';
+    const sections = [...document.querySelectorAll<HTMLElement>('.wt-chapter')];
+    const steps = [...document.querySelectorAll<HTMLButtonElement>('.wt-step')];
+    const prev = document.getElementById('wt-prev') as HTMLButtonElement;
+    const next = document.getElementById('wt-next') as HTMLButtonElement;
+    const position = document.getElementById('wt-position')!;
+    const bar = document.getElementById('wt-progress-bar')!;
+    let current = 0;
+
+    function show(index: number, focus = false) {
+      current = Math.max(0, Math.min(sections.length - 1, index));
+      sections.forEach((section, i) => { section.hidden = i !== current; });
+      steps.forEach((step, i) => {
+        step.classList.toggle('active', i === current);
+        step.classList.toggle('done', i < current);
+        if (i === current) step.setAttribute('aria-current', 'step'); else step.removeAttribute('aria-current');
+      });
+      prev.disabled = current === 0;
+      next.disabled = current === sections.length - 1;
+      position.textContent = `Chapter ${current + 1} of ${sections.length}`;
+      bar.style.width = `${(current / (sections.length - 1)) * 100}%`;
+      try { sessionStorage.setItem(storageKey, String(current)); } catch {}
+      if (focus) {
+        const heading = sections[current].querySelector<HTMLElement>('h2');
+        heading?.setAttribute('tabindex', '-1');
+        heading?.focus();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+
+    steps.forEach((step, i) => step.addEventListener('click', () => show(i, true)));
+    prev.addEventListener('click', () => show(current - 1, true));
+    next.addEventListener('click', () => show(current + 1, true));
+    document.getElementById('wt-restart')?.addEventListener('click', () => show(0, true));
+    document.addEventListener('keydown', (event) => {
+      const target = event.target as HTMLElement;
+      if (event.altKey || event.ctrlKey || event.metaKey || target.closest('input, textarea, select, dialog[open]')) return;
+      if (event.key === 'ArrowRight') show(current + 1, true);
+      if (event.key === 'ArrowLeft') show(current - 1, true);
+    });
+
+    const dialog = document.getElementById('kickoff') as HTMLDialogElement;
+    let saved = 0;
+    try { saved = Number(sessionStorage.getItem(storageKey)) || 0; } catch {}
+    if (dialog.dataset.open === 'true') {
+      saved = 0;
+      const url = new URL(location.href);
+      url.searchParams.delete('kickoff');
+      history.replaceState(null, '', url);
+      dialog.showModal();
+    }
+    document.getElementById('kickoff-start')!.addEventListener('click', () => { dialog.close(); show(0, true); });
+    show(saved);
+
+    // Keep an open tooltip inside the viewport when its term sits near the right edge.
+    const placeTip = (event: Event) => {
+      const term = (event.target as HTMLElement).closest?.('.term');
+      const tip = term?.querySelector<HTMLElement>('.term-tip');
+      if (!tip) return;
+      tip.style.setProperty('--tip-shift', '0px');
+      requestAnimationFrame(() => {
+        const rect = tip.getBoundingClientRect();
+        const width = document.documentElement.clientWidth;
+        let shift = 0;
+        if (rect.right > width - 8) shift = width - 8 - rect.right;
+        if (rect.left + shift < 8) shift = 8 - rect.left;
+        tip.style.setProperty('--tip-shift', `${shift}px`);
+      });
+    };
+    document.addEventListener('mouseover', placeTip);
+    document.addEventListener('focusin', placeTip);
+
+    type Alert = { title: string; type: string; severity: string; status: string; correlation: string; portal: string };
+    type Evidence = { state: string; alerts: Alert[]; detail: string; portal: string };
+
+    function line(parent: HTMLElement, tag: string, text: string, className?: string) {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      if (className) element.className = className;
+      parent.append(element);
+      return element;
+    }
+
+    function renderEvidence(box: HTMLElement, evidence: Evidence, finished: boolean) {
+      box.querySelector('.wt-evidence')?.remove();
+      const wrap = document.createElement('div');
+      wrap.className = 'wt-evidence';
+      if (evidence.alerts?.length) {
+        line(wrap, 'p', 'Defender for SQL raised an alert for this activity:', 'wt-hit');
+        for (const alert of evidence.alerts) {
+          const card = document.createElement('div');
+          card.className = 'wt-alert';
+          line(card, 'div', `${alert.severity} · ${alert.title}`, 'wt-alert-title');
+          line(card, 'p', `${alert.type} · ${alert.status}. ${alert.correlation}`, 'wt-fine');
+          const link = document.createElement('a');
+          link.href = alert.portal; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = 'Open in Defender for Cloud';
+          card.append(link);
+          wrap.append(card);
+        }
+      } else if (evidence.state === 'unavailable') {
+        line(wrap, 'p', `Defender evidence unavailable: ${evidence.detail}`);
+      } else {
+        line(wrap, 'p', finished
+          ? 'No matching Defender alert appeared within 10 minutes. Alerts can take longer, and bounded tests may not cross every threshold. Check Defender for Cloud later.'
+          : 'Watching Defender for Cloud for a matching alert. Alerts usually take a few minutes; this checks every 30 seconds for up to 10 minutes.');
+      }
+      box.append(wrap);
+    }
+
+    async function poll(box: HTMLElement, runId: string) {
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 30000));
+        try {
+          const response = await fetch(`/api/walkthrough/run?runId=${encodeURIComponent(runId)}`, { headers: { Accept: 'application/json' } });
+          const data = await response.json();
+          if (!response.ok) { line(box, 'p', data.error || 'Defender evidence check failed.'); return; }
+          renderEvidence(box, data.evidence, false);
+          if (data.evidence?.alerts?.length || data.evidence?.state === 'unavailable') return;
+        } catch { /* transient network error: keep polling */ }
+      }
+      renderEvidence(box, { state: 'none', alerts: [], detail: '', portal: '' }, true);
+    }
+
+    for (const form of document.querySelectorAll<HTMLFormElement>('.wt-run-form')) {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button[type="submit"]') as HTMLButtonElement;
+        const box = form.querySelector('.wt-result') as HTMLElement;
+        box.hidden = false;
+        box.replaceChildren();
+        line(box, 'p', 'Running Ghostpaw’s move against the lab SQL Server…');
+        button.disabled = true;
+        try {
+          const response = await fetch(form.action, { method: 'POST', body: new FormData(form), headers: { Accept: 'application/json' } });
+          const data = await response.json();
+          box.replaceChildren();
+          const run = data.run;
+          if (!response.ok && !run) { line(box, 'p', data.error || 'The live step failed.', 'wt-miss'); return; }
+          if (!response.ok) line(box, 'p', data.error || 'The live step failed.', 'wt-miss');
+          if (run) {
+            line(box, 'p', `What SQL Server saw: ${run.sqlProtection}`);
+            if (run.comparison) {
+              const c = run.comparison;
+              line(box, 'p', `Legitimate lookup matched ${c.baselineMatches} order. The injected string-built query matched ${c.unsafeMatches}. The parameterized query matched ${c.parameterizedMatches}.`, 'wt-hit');
+            }
+            line(box, 'p', run.outcome, 'wt-fine');
+            if (run.state !== 'failed') { renderEvidence(box, { state: 'pending', alerts: [], detail: '', portal: '' }, false); await poll(box, run.runId); }
+          }
+        } catch {
+          box.replaceChildren();
+          line(box, 'p', 'The live step could not be reached. Try again in a minute.', 'wt-miss');
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+  </script>
+
+  <style is:global>
+    .kickoff { max-width: 620px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: inherit; padding: 28px; box-shadow: var(--shadow); }
+    .kickoff::backdrop { background: rgba(0, 0, 0, .6); }
+    .kickoff li { margin: 6px 0; }
+    .wt-progress { height: 4px; background: var(--surface-alt); border-radius: 4px; margin: 18px 0 8px; overflow: hidden; }
+    .wt-progress span { display: block; height: 100%; width: 0; background: var(--blue); transition: width .3s; }
+    .wt-stepper ol { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0 0 20px; }
+    .wt-step { display: flex; align-items: center; gap: 6px; background: var(--surface-alt); color: var(--text-soft); border: 1px solid var(--border); font-weight: 500; }
+    .wt-step.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .wt-step.done { color: var(--success); }
+    .wt-step-num { font-weight: 700; }
+    .wt-chapter h2 { margin-top: 4px; }
+    .wt-clock { color: var(--muted); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+    .wt-lead { font-size: 18px; }
+    .wt-callout { border-left: 4px solid var(--blue); background: var(--blue-tint); padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+    .wt-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .wt-attacker { border: 1px dashed var(--error); border-radius: 8px; padding: 12px 16px; margin: 12px 0 18px; }
+    .wt-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .wt-side { border: 1px solid var(--border); border-radius: 10px; padding: 16px; background: var(--surface); }
+    .wt-without { border-top: 4px solid var(--muted); }
+    .wt-with { border-top: 4px solid var(--success); }
+    .wt-side pre { background: var(--surface-alt); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .wt-alert { border: 1px solid var(--border); border-left: 4px solid var(--error); border-radius: 6px; padding: 10px 12px; margin: 8px 0; background: var(--surface-alt); }
+    .wt-alert-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+    .wt-alert-title { font-weight: 600; }
+    .wt-alert dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 8px 0 0; font-size: 13px; }
+    .wt-alert dt { color: var(--muted); }
+    .wt-alert dd { margin: 0; }
+    .wt-sev { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; color: #fff; background: var(--warning); }
+    .wt-sev-high { background: var(--error); }
+    .wt-sev-informational { background: var(--muted); }
+    .wt-fine { font-size: 12px; color: var(--muted); }
+    .wt-controls li { margin: 6px 0; }
+    .wt-live { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 20px 0; background: var(--surface-alt); }
+    .wt-result { margin-top: 12px; }
+    .wt-hit { color: var(--success); font-weight: 600; }
+    .wt-miss { color: var(--error); font-weight: 600; }
+    .wt-presenter { margin: 12px 0; color: var(--text-soft); }
+    .wt-presenter summary { cursor: pointer; font-weight: 600; }
+    .wt-nav { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 28px 0 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+    .wt-nav button:disabled { opacity: .4; cursor: default; }
+    .term { position: relative; border-bottom: 1px dotted currentColor; cursor: help; }
+    .term:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+    .term-tip { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; width: max-content; max-width: min(320px, calc(100vw - 32px)); padding: 10px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 13px; font-weight: 400; line-height: 1.45; color: var(--text-soft); display: none; transform: translateX(var(--tip-shift, 0px)); pointer-events: none; text-transform: none; letter-spacing: normal; }
+    .term-tip strong { color: inherit; display: block; margin-bottom: 2px; }
+    .term:hover .term-tip, .term:focus .term-tip { display: block; }
+    @media (prefers-reduced-motion: reduce) { .wt-progress span { transition: none; } }
+  </style>
+</Layout>

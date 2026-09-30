@@ -23,12 +23,15 @@ export function pageMetadata(
   const loginPage = path === "/login" || path === "/admin/login";
   const managerPage =
     path === "/orders" || path.startsWith("/orders/");
+  const walkthroughPage = path === "/walkthrough";
   const description =
     descriptions[path] ??
     (loginPage
       ? "Manager and administrator login for the Pawton Manufacturing training environment."
       : managerPage
       ? "Authorized manager access to customer-order management in the Pawton Manufacturing training environment."
+      : walkthroughPage
+      ? "Guided Defender for SQL attack story for the Pawton Manufacturing training environment."
       : "Restricted administrator access to the Pawton Manufacturing cloud-security training environment.");
   const host = (
     environment.PORTAL_CUSTOM_DOMAIN ||
@@ -42,7 +45,7 @@ export function pageMetadata(
     /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host);
   const origin = validHost ? `https://${host}` : null;
   return {
-    title: `${publicPage ? title : loginPage ? "Login" : managerPage ? "Order management" : "Administration"} — ${SITE_NAME}`,
+    title: `${publicPage ? title : loginPage ? "Login" : managerPage ? "Order management" : walkthroughPage ? "Defender for SQL walkthrough" : "Administration"} — ${SITE_NAME}`,
     description,
     robots: ROBOTS_POLICY,
     canonical:
