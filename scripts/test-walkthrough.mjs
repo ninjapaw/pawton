@@ -85,6 +85,22 @@ const post = (path, body, requestOrigin = origin) =>
     body: new URLSearchParams(body),
   });
 
+test("the public walkthrough keeps live controls and kickoff behind a presenter session", async () => {
+  const page = await readFile(
+    new URL(
+      "../apps/pawton-manufacturing/src/pages/walkthrough.astro",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(page, /Astro\.redirect\(|viewer\.role/);
+  assert.match(page, /const kickoff = Boolean\(viewer\) &&/);
+  assert.match(page, /\{chapter\.live && viewer && runnable\(chapter\.scenario\)/);
+  assert.match(page, /\{chapter\.live && !viewer &&/);
+  assert.match(page, /Sign in as a walkthrough guide or administrator/);
+  assert.match(page, /viewer\?\.role === 'admin'/);
+});
+
 test("signing in as the guide account kicks off the walkthrough with only a guide session", async (context) => {
   configure(context);
   const cookies = jar({ [USER_SESSION_COOKIE]: "stale" });
@@ -225,6 +241,15 @@ test("walkthrough run API starts allow-listed tests and only reveals walkthrough
       cookies,
     });
   assert.equal((await get(jar(), runId)).status, 401);
+  assert.equal(
+    (
+      await get(
+        jar({ [USER_SESSION_COOKIE]: createUserSession() }),
+        runId,
+      )
+    ).status,
+    401,
+  );
   assert.equal((await get(guideCookies(), "not-a-run")).status, 400);
   context.mock.method(sqlAttackRunner, "getRun", () => ({
     runId,

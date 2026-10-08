@@ -1,9 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import RecordPager from '../../components/RecordPager.astro';
-import { isAuthenticated } from '../../lib/adminAuth.mjs';
 import { query } from '../../lib/db.mjs';
-if (!isAuthenticated(Astro.cookies)) return Astro.redirect('/admin/login');
 Astro.response.headers.set('Cache-Control', 'no-store');
 let objects: Array<Record<string, string | number | boolean | null>> = [];
 let users: Array<Record<string, string | null>> = [];

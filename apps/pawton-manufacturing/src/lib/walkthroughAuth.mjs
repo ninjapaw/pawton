@@ -86,7 +86,7 @@ export function getWalkthroughUser(cookies) {
   }
 }
 
-// Administrators may also present the walkthrough; nobody else can view or drive it.
+// Only administrators and guides may run walkthrough tests; the story itself is public.
 export function getWalkthroughViewer(cookies) {
   if (isAuthenticated(cookies))
     return { role: "admin", name: process.env.ADMIN_PORTAL_USERNAME };

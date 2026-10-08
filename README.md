@@ -194,20 +194,27 @@ for local development and prebuilt deployment requirements.
 
 ## Guided walkthrough: why Defender for SQL
 
-Sign in at `/login` as the **walkthrough guide** (`dojo-guide` by default) and the site opens a
-self-guided story at `/walkthrough`. A fictional attacker, Ghostpaw, goes after Pawton's SQL
+The read-only **Walkthrough**, **Schema** (`/admin/schema`), and **Auditing**
+(`/admin/auditing`) pages are available in the main navigation without signing in. Schema
+remains permission-filtered to the application SQL connection; Auditing provides guidance and
+a downloadable SQL template, not an execution endpoint.
+
+Open the self-guided story at `/walkthrough`. A fictional attacker, Ghostpaw, goes after Pawton's SQL
 Server in five acts: brute force, a known attack tool, SQL injection through the app, a
 rarely-seen principal, and an obfuscated operating-system shell. Each act shows, side by side,
 what a team *without* Defender for SQL would see (raw log lines) and the Defender for SQL alert
 that fires instead, with its official name, alert type, severity, and MITRE tactic. Dotted terms
 have hover and keyboard tooltips, and a debrief compares the two outcomes, shows the live
 Defender plan status, and states plainly what Defender for SQL does *not* do: it detects and
-alerts, it doesn't block inline.
+alerts, it doesn't block inline. To run the live acts, sign in at `/login` as the
+**walkthrough guide** (`dojo-guide` by default) or an administrator. Guide sign-in opens the
+walkthrough's mission briefing; signed-out visitors and managers can read the story but cannot
+run tests or retrieve run evidence.
 
 The guide is a least-privilege presenter account:
 
-- It can view only the walkthrough. It has no access to orders, SQL logins, `sa`, or any Security
-  lab setting.
+- It can browse all public pages, but has no access to order management, SQL login management,
+  `sa`, or any Security lab setting.
 - It can run just the three unprivileged acts live (brute force, harmful application, and
   synthetic SQL injection). These use the `futon_app` login and the shared attack cooldown, and
   the page then polls Defender for Cloud for a matching alert for up to 10 minutes.
@@ -230,9 +237,10 @@ turn off Defender.
 Event, log, and status timestamps display in Eastern time by default; see
 [display timezone](#display-timezone) to change it.
 
-The portal separates `/users` (SQL login management), `/admin` (security lab and live
-protection observations), `/admin/schema` (read-only database inspection), and
-`/admin/auditing` (audit setup and verification).
+The portal restricts `/users` (SQL login management) and `/admin` (security lab and live
+protection observations) to administrators. `/admin/schema` (read-only database inspection)
+and `/admin/auditing` (audit setup and verification guidance) remain at their existing URLs
+but are available without signing in.
 
 - **Privilege risk.** The admin portal's SQL login, `dojo_admin_portal_svc`, holds `CONTROL
 SERVER` to manage the built-in administrator. Compromise of the app or its credentials can

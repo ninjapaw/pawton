@@ -323,6 +323,19 @@ test("page metadata uses configured canonical origins and route-specific descrip
   assert.equal(inventory.canonical, "https://pawton.example.org/inventory");
   assert.match(inventory.description, /Inventory valuation/);
   assert.notEqual(inventory.description, home.description);
+  for (const [path, title, description] of [
+    ["/walkthrough", "Defender for SQL walkthrough", /Guided Defender for SQL/],
+    ["/admin/schema", "Schema", /Read-only database schema/],
+    ["/admin/auditing", "SQL auditing", /SQL Server Audit configuration/],
+  ]) {
+    const metadata = pageMetadata(`${path}/`, title, environment);
+    assert.equal(metadata.title, `${title} — Pawton Manufacturing`);
+    assert.match(metadata.description, description);
+    assert.equal(metadata.canonical, `https://pawton.example.org${path}`);
+    assert.equal(metadata.social, true);
+    assert.equal(metadata.socialImage, home.socialImage);
+    assert.equal(metadata.robots, ROBOTS_POLICY);
+  }
   assert.equal(
     pageMetadata("/", "Overview", {
       WEBSITE_HOSTNAME: "fallback.azurewebsites.net",
@@ -352,7 +365,7 @@ test("private page metadata excludes order identifiers and user-provided titles"
     "/orders",
     "/orders/12345",
     "/admin",
-    "/admin/schema",
+    "/admin/login",
     "/users",
   ]) {
     const metadata = pageMetadata(path, "Customer private name", {
@@ -398,6 +411,37 @@ test("shared head and middleware provide crawler and social metadata without dis
   const image = await readFile(new URL("public/pawton-social.png", root));
   assert.equal(image.readUInt32BE(16), 1200);
   assert.equal(image.readUInt32BE(20), 630);
+});
+
+test("read-only learning pages are public and linked once for every visitor", async () => {
+  const root = new URL("../apps/pawton-manufacturing/src/", import.meta.url);
+  const layout = await readFile(new URL("layouts/Layout.astro", root), "utf8");
+  const publicNavigation = layout.slice(
+    layout.indexOf("<nav>"),
+    layout.indexOf("{adminUsername ? ("),
+  );
+  for (const [path, label] of [
+    ["/walkthrough", "Walkthrough"],
+    ["/admin/schema", "Schema"],
+    ["/admin/auditing", "Auditing"],
+  ]) {
+    assert.ok(
+      publicNavigation.includes(`<a href="${path}">${label}</a>`),
+      `${label} is visible without a session`,
+    );
+    assert.equal(layout.split(`href="${path}"`).length - 1, 1);
+    const source = await readFile(
+      new URL(`pages${path}.astro`, root),
+      "utf8",
+    );
+    assert.doesNotMatch(source, /Astro\.redirect\(/);
+  }
+  const schema = await readFile(
+    new URL("pages/admin/schema.astro", root),
+    "utf8",
+  );
+  assert.match(schema, /import \{ query \} from '\.\.\/\.\.\/lib\/db\.mjs'/);
+  assert.doesNotMatch(schema, /adminDb|adminAuth/);
 });
 
 test("shared SQL configuration preserves credential and pool separation", () => {

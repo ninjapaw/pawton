@@ -165,13 +165,13 @@ Astro.response.headers.set('Cache-Control', 'private, no-store');
       <a href="/orders">Manage orders</a>
       <a href="/production">Production</a>
       <a href="/status">Status</a>
+      <a href="/walkthrough">Walkthrough</a>
+      <a href="/admin/schema">Schema</a>
+      <a href="/admin/auditing">Auditing</a>
       {adminUsername ? (
         <>
           <a href="/users">SQL logins</a>
           <a href="/admin">Security lab</a>
-          <a href="/admin/schema">Schema</a>
-          <a href="/admin/auditing">Auditing</a>
-          <a href="/walkthrough">Walkthrough</a>
           <span class="user-chip" title={`Signed in as ${adminUsername}`}>{adminUsername}</span>
           <form class="logout-form" method="post" action="/api/admin/logout">
             <button class="nav-action" type="submit">Logout</button>
@@ -179,7 +179,6 @@ Astro.response.headers.set('Cache-Control', 'private, no-store');
         </>
       ) : guideUsername ? (
         <>
-          <a href="/walkthrough">Walkthrough</a>
           <span class="user-chip" title={`Walkthrough guide: ${guideUsername}`}>{guideUsername}</span>
           <form class="logout-form" method="post" action="/api/walkthrough/logout"><button class="nav-action" type="submit">Sign out</button></form>
         </>

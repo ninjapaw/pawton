@@ -1,12 +1,7 @@
 ---
 /// <reference path="../../sql.d.ts" />
 import Layout from '../../layouts/Layout.astro';
-import { isAuthenticated } from '../../lib/adminAuth.mjs';
 import auditTemplate from '../../../public/sql/configure-auditing.sql?raw';
-
-if (!isAuthenticated(Astro.cookies)) {
-  return Astro.redirect('/admin/login');
-}
 ---
 <Layout title="SQL auditing">
   <header class="page-header">

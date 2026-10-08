@@ -7,10 +7,9 @@ import { getDefenderStatus } from '../lib/defenderStatus.mjs';
 import { sqlAttackRunner } from '../lib/sqlAttackLab.mjs';
 
 const viewer = getWalkthroughViewer(Astro.cookies);
-if (!viewer) return Astro.redirect('/login');
 Astro.response.headers.set('Cache-Control', 'no-store');
 
-const kickoff = Astro.url.searchParams.get('kickoff') === '1';
+const kickoff = Boolean(viewer) && Astro.url.searchParams.get('kickoff') === '1';
 const defender = await getDefenderStatus();
 const availability: { ids: string[]; reason: string | null } = await sqlAttackRunner.availability();
 const runnable = (scenario?: string) => Boolean(scenario && walkthroughRunnableScenarios.includes(scenario) && availability.ids.includes(scenario));
@@ -20,7 +19,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
 <Layout title="Defender for SQL walkthrough">
   <dialog class="kickoff" id="kickoff" data-open={kickoff ? 'true' : 'false'} aria-labelledby="kickoff-title">
     <p class="eyebrow">Mission briefing</p>
-    <h2 id="kickoff-title">Welcome, {viewer.name}. Your shift is starting.</h2>
+    <h2 id="kickoff-title">Welcome{viewer ? `, ${viewer.name}` : ''}. Your shift is starting.</h2>
     <p>Tonight, a fictional attacker called <strong>Ghostpaw</strong> goes after Pawton Manufacturing's SQL Server in five moves. For each move you'll see what a team <em>without</em> Defender for SQL would notice, and what Defender for SQL reports instead.</p>
     <ul>
       <li><strong>Three moves are live.</strong> They run real, bounded activity against this lab's SQL Server and then watch for a matching Defender alert.</li>
@@ -93,7 +92,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
 
         <div class="wt-live">
           <span class="wt-tag">Try it live</span>
-          {chapter.live && runnable(chapter.scenario) && (
+          {chapter.live && viewer && runnable(chapter.scenario) && (
             <form class="wt-run-form" method="post" action="/api/walkthrough/run">
               <input type="hidden" name="scenario" value={chapter.scenario} />
               <p>{chapter.live.summary}</p>
@@ -103,10 +102,11 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
               <div class="wt-result" role="status" aria-live="polite" hidden></div>
             </form>
           )}
-          {chapter.live && !runnable(chapter.scenario) && <p>Live run unavailable: {availability.reason ?? 'this test is not configured on this environment.'}</p>}
+          {chapter.live && !viewer && <p><a href="/login">Sign in as a walkthrough guide or administrator</a> to run this step. You can read the full story without signing in.</p>}
+          {chapter.live && viewer && !runnable(chapter.scenario) && <p>Live run unavailable: {availability.reason ?? 'this test is not configured on this environment.'}</p>}
           {chapter.adminOnly && <>
             <p>{chapter.adminOnly}</p>
-            {viewer.role === 'admin' && <p><a class="pill" href={`/admin#attack-${chapter.scenario}`}>Run it in the Security lab</a></p>}
+            {viewer?.role === 'admin' && <p><a class="pill" href={`/admin#attack-${chapter.scenario}`}>Run it in the Security lab</a></p>}
           </>}
         </div>
 
@@ -131,7 +131,8 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
 
         <div class="actions">
           <button type="button" class="secondary" id="wt-restart">Start the story again</button>
-          {viewer.role === 'admin' && <><a class="pill" href="/admin">Open the Security lab</a><a class="pill" href="/admin/auditing">Review SQL audit evidence</a></>}
+          {viewer?.role === 'admin' && <a class="pill" href="/admin">Open the Security lab</a>}
+          <a class="pill" href="/admin/auditing">Review SQL audit evidence</a>
           <a class="pill" href={alertReference} target="_blank" rel="noopener noreferrer">All SQL alert types</a>
         </div>
       </>}
