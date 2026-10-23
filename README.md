@@ -402,6 +402,23 @@ This path requires **Cloudflare DNS-only (grey cloud), with CNAME flattening off
 [custom-domain.bicep](infra/sql-defender-scenario/custom-domain.bicep) for the Azure
 hostname/certificate side of the lifecycle.
 
+DNS provider logic now comes from the shared
+[Pawprint reconciler](vendor/pawprint-dns/scripts/cloudflare-dns.mjs);
+[the local adapter](scripts/configure-pawton-dns.mjs) retains Pawton's lifecycle
+and Bicep-managed TLS behavior. New records are labelled for
+`ninjapaw/pawton:dev` or `:prod`. Equivalent legacy records keep their TTL and
+comments; only the exact owner may update a same-type record, and foreign
+targets or duplicate names fail before DNS writes.
+
+Run `npm run test:domain` for DNS regression and snapshot checks. The
+[DNS snapshot manifest](vendor/pawprint-dns.manifest.json) hashes the exact
+vendored source independently of the existing pinned core-kit workflow. Update
+it from reviewed Pawprint source with `vendor-sync.mjs --prefix
+vendor/pawprint-dns --snapshot`, never by editing a vendored copy. Publish shared
+source before the consumer. No apex, mail, nameserver, account, or shared records
+are managed by this application. Remove the routing CNAME before releasing the
+app's Azure hostname; ordinary Azure teardown does not remove external DNS.
+
 ### Display timezone
 
 Set `sqlScenario.portalTimeZone` in [deployment configuration](config/deploy.config.json), or

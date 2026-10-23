@@ -14,12 +14,14 @@ const settings = {
   verificationId: "A".repeat(64),
   zoneId: "b".repeat(32),
   token: "test-token-not-to-log",
+  owner: "ninjapaw/pawton:dev",
 };
 function cloudflare(
   initial = [],
   zone = { name: "example.org", status: "active" },
 ) {
   const records = structuredClone(initial);
+  for (const [index, record] of records.entries()) record.id = (index + 1).toString(16).padStart(32, "0");
   const writes = [];
   const fetcher = async (url, options) => {
     assert.ok(
@@ -30,9 +32,10 @@ function cloudflare(
     assert.equal(options.headers.Authorization, `Bearer ${settings.token}`);
     assert.equal(options.redirect, "error");
     let result;
-    if (!url.includes("/dns_records")) result = zone;
+    if (!url.includes("/dns_records")) result = { id: settings.zoneId, ...zone };
     else if (options.method === "POST") {
       result = JSON.parse(options.body);
+      result.id = (records.length + 1).toString(16).padStart(32, "0");
       assert.ok(!options.body.includes(settings.token));
       records.push(result);
       writes.push(result);
@@ -82,7 +85,8 @@ test("Cloudflare dry run writes nothing and a second apply is a no-op", async ()
     ["created", "created"],
   );
   assert.equal(mock.writes.length, 2);
-  assert.deepEqual(mock.records, desiredRecords(settings));
+  assert.deepEqual(mock.records.map(({ id, comment, ...record }) => record), desiredRecords(settings));
+  assert.ok(mock.records.every((record) => record.comment === "pawprint:dns:ninjapaw/pawton:dev"));
   assert.equal(mock.records[1].proxied, false);
   assert.deepEqual(
     (await reconcileDns(settings, { ...mock, apply: true })).map(
@@ -105,14 +109,14 @@ test("existing DNS conflicts fail before any record is written", async () => {
     const mock = cloudflare([conflict]);
     await assert.rejects(
       reconcileDns(settings, { ...mock, apply: true }),
-      /Conflicting DNS/,
+        /Conflicting DNS/,
     );
     assert.equal(mock.writes.length, 0);
   }
   const duplicate = cloudflare([txt, txt]);
   await assert.rejects(
     reconcileDns(settings, { ...duplicate, apply: true }),
-    /Conflicting DNS/,
+    /Ambiguous DNS/,
   );
 });
 

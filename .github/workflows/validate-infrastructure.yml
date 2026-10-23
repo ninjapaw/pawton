@@ -7,6 +7,8 @@ on:
       - "scripts/**"
       - "apps/pawton-manufacturing/**"
       - "config/**"
+      - "vendor/pawprint-dns/**"
+      - "vendor/pawprint-dns.manifest.json"
       - "package*.json"
       - ".node-version"
       - ".github/workflows/**"
@@ -18,6 +20,8 @@ on:
       - "scripts/**"
       - "apps/pawton-manufacturing/**"
       - "config/**"
+      - "vendor/pawprint-dns/**"
+      - "vendor/pawprint-dns.manifest.json"
       - "package*.json"
       - ".node-version"
       - ".github/workflows/**"
@@ -62,6 +66,7 @@ jobs:
 
       - name: Validate repository and portal
         run: |
+          npm run vendor:check:dns
           bash scripts/test.sh --skip-azure
           npm test --prefix apps/pawton-manufacturing
           npm run build --prefix apps/pawton-manufacturing

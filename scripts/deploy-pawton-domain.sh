@@ -25,7 +25,8 @@ Usage: bash scripts/deploy-pawton-domain.sh <plan|check|deploy> [options]
 Options: --environment dev|prod --subscription ID --resource-group NAME
          --web-app-name NAME --custom-domain HOST --cloudflare-zone-id ID --yes
 Secrets: CLOUDFLARE_API_TOKEN in the environment only (Zone Read + DNS Edit).
-Cloudflare must remain DNS-only; existing conflicting records are never changed.
+Cloudflare must remain DNS-only. Foreign/ambiguous records are never changed;
+only records labelled for this repository and environment may be updated.
 EOF
 }
 while (($#)); do
@@ -61,6 +62,7 @@ ZONE_ID="${ZONE_ID:-$(setting cloudflareZoneId '')}"
 [[ -n "$DOMAIN" ]] || { printf '[skip] No webAppCustomDomain configured.\n'; exit 0; }
 DOMAIN="$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]')"
 export PAWTON_DOMAIN="$DOMAIN"
+export PAWTON_ENVIRONMENT="$ENVIRONMENT"
 "$NODE_COMMAND" scripts/configure-pawton-dns.mjs validate
 printf 'Pawton custom domain: %s\nWeb App: %s\nResource group: %s\nCloudflare zone: %s\nDNS mode: DNS-only (not proxied)\n' "$DOMAIN" "$WEB_APP_NAME" "$RESOURCE_GROUP" "${ZONE_ID:-not configured}"
 if [[ "$COMMAND" == plan ]]; then

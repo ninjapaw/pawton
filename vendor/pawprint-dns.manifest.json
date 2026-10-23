@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "source": "https://github.com/ninjapaw/pawprint",
+  "sourceRevision": "working-tree@fa99375ec44e63b240e60fa194fc6badbb43276d",
+  "vendorPath": "vendor/pawprint-dns",
+  "note": "Content hashes identify this reviewed source snapshot; the base commit alone does not. Publish shared-source changes before consumers. Existing core-kit workflow pins remain unchanged.",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "0e155750fe02b7abc54fae77bf1c2a9a9e917a3e2685761d26c52afc57026ab5"
+    },
+    {
+      "path": "scripts/cloudflare-dns.mjs",
+      "sha256": "54597443087c5b9ce92ed6f26ad23d2059d894761e49a8d777b923d1e4264a65"
+    },
+    {
+      "path": "scripts/vendor-sync.mjs",
+      "sha256": "589f17c021ef834ca22333e6e5205c2a7c82f7ca6a2e0e236970b196d984e11a"
+    }
+  ]
+}
