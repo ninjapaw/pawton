@@ -190,7 +190,42 @@ application instead of only infrastructure evidence:
 
 The deployment script uploads the portal source after infrastructure provisioning and uses
 Azure's remote build service. See [portal setup and configuration](#portal-setup-and-configuration)
-for local development and prebuilt deployment requirements.
+for local development and prebuilt deployment requirements. Every page includes a **GitHub
+source** footer link back to [this repository](https://github.com/ninjapaw/pawton).
+
+For a manual App Service Git deployment, the repository-root [`.deployment`](.deployment)
+selects `apps/pawton-manufacturing` instead of the infrastructure repository root. The wizard's
+ZIP deployment still packages that application directory directly and is unchanged.
+
+### SQL Server not responding
+
+The Web App can keep running while the SQL VM is stopped or deallocated. In that state,
+`/health` reports `"database":"unreachable"` and the dashboard cannot load live records.
+Check the VM power state before changing SQL credentials or firewall rules:
+
+```bash
+az vm get-instance-view \
+  --resource-group NP-ninjapaws-dojo-sql-Dev-CentralUS \
+  --name ninjapaws-sql-vm-dev \
+  --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus | [0]" \
+  --output tsv
+```
+
+If it is stopped or deallocated, start the existing VM:
+
+```bash
+az vm start \
+  --resource-group NP-ninjapaws-dojo-sql-Dev-CentralUS \
+  --name ninjapaws-sql-vm-dev
+curl --fail --max-time 20 https://pawton.ninjapaws.org/health
+```
+
+These names and the website address are the default **dev** environment; use your deployment's
+values for other environments. Allow Windows and SQL Server to finish starting, then confirm
+`/health` reports `"status":"healthy"` and `"database":"connected"` and `/status` shows live
+sample records. If the VM is running but connectivity still fails, check the `MSSQLSERVER`
+service and the private VNet path. Starting the VM resumes compute charges; deallocating it
+again to save costs also makes the database-backed website unavailable.
 
 ## Guided walkthrough: why Defender for SQL
 
