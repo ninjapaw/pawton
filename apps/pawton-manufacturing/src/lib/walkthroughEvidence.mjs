@@ -99,6 +99,9 @@ export function createWalkthroughCapture(payload, capturedAt = new Date().toISOS
       startedAt: run.startedAt,
       completedAt: run.completedAt,
       state: run.state,
+      ...(["synthetic", "lab-table"].includes(run.dataMode) ? { dataMode: run.dataMode } : {}),
+      ...(["fixed", "unique"].includes(run.sourceMode) ? { sourceMode: run.sourceMode } : {}),
+      ...(typeof run.sourceUrl === "string" ? { sourceUrl: redactEvidenceText(run.sourceUrl, run) } : {}),
       sqlProtection: redactEvidenceText(run.sqlProtection, run),
       outcome: redactEvidenceText(run.outcome, run),
       executionEvidence: executionFields(run),
@@ -188,8 +191,12 @@ export function formatExecutionEvidence(run) {
     startedAt: run.startedAt,
     completedAt: run.completedAt,
     state: run.state,
+    dataMode: run.dataMode,
+    sourceMode: run.sourceMode,
+    sourceUrl: run.sourceUrl,
     marker: run.marker,
     sqlProtection: run.sqlProtection,
+    outcome: run.outcome,
     executionEvidence: run.executionEvidence,
   }, null, 2);
 }

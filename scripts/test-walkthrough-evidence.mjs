@@ -132,6 +132,7 @@ test("empty, partial, capped and denied native queries remain distinct from a ne
 
 test("capture publication projects actual fields, redacts secrets and retains uncertain Defender attribution", () => {
   const run = runFixture();
+  run.dataMode = "synthetic";
   run.executionEvidence = { source: "SQL Server execution response", password: "never-publish", queryResult: { BaselineMatches: 1, SafeMatches: 0, UnsafeMatches: 4, QuoteProbeError: 105, hidden: "never-publish" } };
   const capture = createWalkthroughCapture({
     run,
@@ -141,6 +142,7 @@ test("capture publication projects actual fields, redacts secrets and retains un
   assert.ok(!JSON.stringify(capture).includes("never-publish"));
   assert.ok(!JSON.stringify(capture).includes("10.2.3.4"));
   assert.equal(capture.defender.alerts[0].correlated, false);
+  assert.equal(capture.run.dataMode, "synthetic");
   assert.match(formatDefenderEvidence(capture.defender), /not confirmed run matches/);
   assert.deepEqual(capture.run.executionEvidence.queryResult, { BaselineMatches: 1, SafeMatches: 0, UnsafeMatches: 4, QuoteProbeError: 105 });
   assert.equal(recordedCaptureFor({ schemaVersion: 1, scenarios: [capture] }, run.scenario), capture);
