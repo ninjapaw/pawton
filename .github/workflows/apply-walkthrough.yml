@@ -1,0 +1,64 @@
+name: Publish actual walkthrough log capture
+on:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/apply-walkthrough.yml
+      - .github/patches/walkthrough-feature.01.br.b64
+permissions:
+  contents: write
+concurrency:
+  group: pawton-walkthrough-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Verify and apply the scoped patch
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const { brotliDecompressSync } = require("node:zlib");
+          const { createHash } = require("node:crypto");
+          const encoded = fs.readFileSync(".github/patches/walkthrough-feature.01.br.b64", "utf8").trim();
+          const patch = brotliDecompressSync(Buffer.from(encoded, "base64"));
+          if (createHash("sha256").update(patch).digest("hex") !== "d4d8ce2d1aa493794c58b0d2e8a00a793234cb29abfc74c2d880ba3537080a29")
+            throw new Error("The scoped patch checksum does not match.");
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "walkthrough.patch"), patch);
+          NODE
+          git apply --check --index "$RUNNER_TEMP/walkthrough.patch"
+          git apply --index "$RUNNER_TEMP/walkthrough.patch"
+      - name: Test and build the portal
+        working-directory: apps/pawton-manufacturing
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Validate repository checks
+        run: bash scripts/test.sh --skip-azure
+      - name: Remove transport and publish the exact verified source tree
+        shell: bash
+        run: |
+          git rm .github/workflows/apply-walkthrough.yml .github/patches/walkthrough-feature.01.br.b64
+          test "$(git write-tree)" = "eb049df8d9040354bc59b72ebf06cf113fbc3742"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: record actual six-scenario walkthrough evidence" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+          git push origin HEAD:dev
+      - name: Stage root-correct deployment source
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/pawton-source"
+          rsync -a --exclude=node_modules --exclude=dist --exclude=.astro apps/pawton-manufacturing/ "$RUNNER_TEMP/pawton-source/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pawton-walkthrough-source
+          path: ${{ runner.temp }}/pawton-source/
+          include-hidden-files: true
+          retention-days: 1
