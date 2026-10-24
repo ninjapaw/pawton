@@ -160,8 +160,10 @@ if (auditConfigured) {
       <dt>Test identity</dt><dd data-result="correlationIdentity"></dd>
       {scenario.id === 'external-source' && <><dt>Source mode</dt><dd data-result="sourceMode"></dd><dt>Requested URL</dt><dd data-result="sourceUrl"></dd></>}
     </dl>
-    <h4>5. Defender evidence</h4>
-    <button class="check-defender" type="button" disabled>Check Defender alerts</button>
+    <details><summary>Actual SQL execution response</summary><pre class="attack-execution-evidence">Awaiting a recorded run.</pre></details>
+    <h4>5. Actual native and Defender evidence</h4>
+    <button class="check-defender" type="button" disabled>Check native logs and Defender alerts</button>
+    <details><summary>Native SQL/Windows logs (no Defender enrichment)</summary><pre class="native-audit-evidence">Awaiting a recorded run. This does not disable Defender.</pre></details>
     <p class="defender-evidence-state" role="status" aria-live="polite">Awaiting a recorded run.</p>
     <p class="defender-blocking">Defender blocking: not confirmed. SQL rejection is not a Defender blocking verdict.</p>
     <ul class="defender-alerts"></ul>
@@ -316,6 +318,7 @@ if (auditConfigured) {
 </style>
 
 <script>
+  import { formatNativeEvidence, formatExecutionEvidence } from '../../lib/walkthroughEvidence.mjs';
   document.querySelectorAll<HTMLFormElement>('.probe-form, .simulation-sample-form').forEach((form) => {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -347,6 +350,8 @@ if (auditConfigured) {
     const evidenceState = scenario.querySelector<HTMLElement>('.defender-evidence-state')!;
     const blocking = scenario.querySelector<HTMLElement>('.defender-blocking')!;
     const alerts = scenario.querySelector<HTMLElement>('.defender-alerts')!;
+    const nativeAudit = scenario.querySelector<HTMLElement>('.native-audit-evidence')!;
+    const execution = scenario.querySelector<HTMLElement>('.attack-execution-evidence')!;
     let runId = '';
     let generation = 0;
     const uniqueConsent = form.querySelector<HTMLInputElement>('[name="confirmUnique"]');
@@ -375,6 +380,8 @@ if (auditConfigured) {
         comparison.textContent = `Verified SQL counts: legitimate lookup ${run.comparison.baselineMatches}; unsafe concatenation ${run.comparison.unsafeMatches}; parameterized input ${run.comparison.parameterizedMatches}. Fixed quote probe: caught SQL syntax error ${run.comparison.quoteProbeError}. Only the fictional dataset above was queried. Defender detection is checked separately below.`;
       }
       evidenceState.textContent = 'Not checked. Defender alerts may take time to appear.';
+      nativeAudit.textContent = 'Not checked. Native Windows audit forwarding can be delayed.';
+      execution.textContent = formatExecutionEvidence(run);
       checkButton.disabled = false;
     }
 
@@ -392,6 +399,7 @@ if (auditConfigured) {
         if (!response.ok) throw new Error(result.error || 'Defender evidence unavailable.');
         if (current !== generation) return;
         const evidence = result.evidence;
+        nativeAudit.textContent = formatNativeEvidence(result.nativeEvidence);
         const labels: Record<string, string> = { correlated: 'Run-correlated alert found', possible: 'Possible related alerts', 'none-yet': 'No matching alerts yet', partial: 'Incomplete lookup', unavailable: 'Unable to verify' };
         evidenceState.textContent = `${labels[evidence.state] || 'Unknown'} - checked ${attackTime(evidence.checkedAt)}. ${evidence.detail}`;
         blocking.textContent = `Defender blocking: ${evidence.blocking}`;

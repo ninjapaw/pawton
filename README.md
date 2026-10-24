@@ -260,6 +260,48 @@ Deployment generates the guide password and stores it in Key Vault as
 `walkthrough-portal-password` (username in `walkthrough-portal-username`). Change the username
 with `sqlScenario.walkthroughPortalUsername` in `config/deploy.config.json`.
 
+### Actual walkthrough log captures
+
+The comparison now separates **native SQL/Windows audit records without Defender enrichment**
+from **actual Defender alert observations from the same protected run**. It does not turn
+Defender off. Story times and reference alert cards remain illustrative and are labeled as
+such; captured records have their own real timestamps, run IDs, query windows and correlation
+strength. An empty query or a time/family-only candidate is never presented as a confirmed
+detection or prevention.
+
+The live walkthrough and administrator evidence APIs read the SQL VM's configured Log Analytics
+workspace using the existing managed identity. Queries are bounded to the VM, execution window
+and run marker/test identity. The `sqlmap` connection keeps its required application name and
+can also be matched by its observed SQL session; that weaker match is labeled explicitly.
+Ingestion may be delayed, synthetic batches need not have statement-level audit records, and
+native records are not a substitute for Defender detections.
+
+To record all six existing bounded Security lab scenarios, supply the administrator username
+and password through **process-only** `ADMIN_PORTAL_USERNAME` / `ADMIN_PORTAL_PASSWORD` from an
+approved secret provider, then run:
+
+```bash
+node scripts/capture-walkthrough.mjs --confirm isolated-lab
+```
+
+The script uses only configured Pawton HTTPS origins, requires the SQL Defender plan to be
+observed as Standard, respects the server cooldown, and observes evidence for up to 10 minutes.
+It never automatically retries an activity POST after a transport failure. To collect delayed
+records for saved run IDs **without repeating any activity**:
+
+```bash
+node scripts/capture-walkthrough.mjs --resume apps/pawton-manufacturing/src/data/walkthrough-capture.json
+```
+
+The generated [capture bundle](apps/pawton-manufacturing/src/data/walkthrough-capture.json)
+contains redacted, bounded actual excerpts and execution results, not credentials or arbitrary
+business rows. Review it before publishing. Redeploy the portal to make those recorded captures
+and their JSON download available to public story readers; the extra external-source capture
+appears in the debrief. Live per-run polling remains authenticated and guide permissions are
+unchanged. Saved captures survive deployment; live run IDs remain limited to 24 hours / 50 runs
+and are reset when the app restarts. Use **Refresh evidence only** for delayed ingestion, and
+never infer Defender blocking from a successful query, SQL rejection, or alert lifecycle state.
+
 ## Admin portal: a deliberate anti-pattern, not a template
 
 `xp_cmdshell` defaults to enabled for shell attack exercises. Set

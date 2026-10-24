@@ -5,6 +5,9 @@ import { getWalkthroughViewer } from '../lib/walkthroughAuth.mjs';
 import { chapters, valueComparison, honestLimits, alertReference, pricingReference, walkthroughRunnableScenarios } from '../lib/walkthroughStory.mjs';
 import { getDefenderStatus } from '../lib/defenderStatus.mjs';
 import { sqlAttackRunner } from '../lib/sqlAttackLab.mjs';
+import recordedCapture from '../data/walkthrough-capture.json';
+import { recordedCaptureFor, formatNativeEvidence, formatDefenderEvidence, formatExecutionEvidence } from '../lib/walkthroughEvidence.mjs';
+import { formatTimestamp, getPortalTimeZone } from '../lib/timeZone.mjs';
 
 const viewer = getWalkthroughViewer(Astro.cookies);
 Astro.response.headers.set('Cache-Control', 'no-store');
@@ -15,6 +18,9 @@ const availability: { ids: string[]; reason: string | null } = await sqlAttackRu
 const runnable = (scenario?: string) => Boolean(scenario && walkthroughRunnableScenarios.includes(scenario) && availability.ids.includes(scenario));
 const sqlPlan = defender.observations.find((observation) => observation.label === 'Defender for SQL on machines');
 const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Free' ? 'off' : 'unverified';
+const portalTimeZone = getPortalTimeZone();
+const externalCapture = recordedCaptureFor(recordedCapture, 'external-source');
+const captureDownload = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(recordedCapture, null, 2))}`;
 ---
 <Layout title="Defender for SQL walkthrough">
   <dialog class="kickoff" id="kickoff" data-open={kickoff ? 'true' : 'false'} aria-labelledby="kickoff-title">
@@ -35,18 +41,29 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
     <p>Follow one attack from first probe to operating-system takeover, and see at each step why detection at the database layer matters.</p>
   </header>
 
-  <div class={planState === 'on' ? 'ok' : 'warn'} role="status">
+  <div class={planState === 'on' ? 'ok' : 'warn'} role="status" data-defender-sql-tier={sqlPlan?.state || 'Unavailable'}>
     {planState === 'on' && <>Live check: <strong>Defender for SQL on machines is enabled</strong> on this subscription, so the live steps below can produce real alerts.</>}
     {planState === 'off' && <>Live check: <strong>Defender for SQL on machines is off</strong> (Free tier) on this subscription. The story still works, but the live steps won't produce Defender alerts until an administrator enables the plan in Defender for Cloud.</>}
     {planState === 'unverified' && <>Live check: <strong>the Defender for SQL plan status couldn't be verified</strong> from this app{sqlPlan?.detail ? <> ({sqlPlan.detail.replace(/\.$/, '')})</> : null}. This doesn't mean the plan is off. The story still works, and the live steps will produce alerts if the plan is enabled; confirm in Defender for Cloud → Environment settings.</>}
   </div>
+
+  <section class="wt-capture-note" aria-label="Live capture provenance">
+    <h2>Real logs, not a Defender-off experiment</h2>
+    <p>The comparison pairs native SQL/Windows audit logs <strong>without Defender enrichment</strong> with actual Defender observations from the <strong>same protected run</strong>. Defender is not disabled. The story clock is fictional; captured records retain their real timestamps, run IDs and query windows.</p>
+    {recordedCapture.scenarios.length > 0 ? <>
+      <p><strong>Recorded live session:</strong> <time datetime={recordedCapture.capturedAt}>{formatTimestamp(recordedCapture.capturedAt, portalTimeZone)}</time>. {recordedCapture.scenarios.length} scenario captures. Native excerpts are redacted and bounded; missing or unconfirmed alerts are reported honestly.</p>
+      <a class="pill" href={captureDownload} download="pawton-walkthrough-live-capture.json">Download actual captured records (JSON)</a>
+    </> : <p class="warn">No operator capture has been saved yet. The reference excerpts below remain illustrative. Signed-in live runs retrieve actual evidence independently.</p>}
+  </section>
 
   <div class="wt-progress" aria-hidden="true"><span id="wt-progress-bar"></span></div>
   <nav class="wt-stepper" aria-label="Walkthrough chapters">
     <ol>{chapters.map((chapter, index) => <li><button type="button" class="wt-step" data-step={index} aria-controls={`chapter-${chapter.id}`}><span class="wt-step-num">{index === 0 ? '▶' : index === chapters.length - 1 ? '✓' : index}</span><span class="wt-step-label">{chapter.kind === 'attack' ? chapter.act?.split(' · ')[1] : chapter.title.split(':')[0]}</span></button></li>)}</ol>
   </nav>
 
-  {chapters.map((chapter, index) => (
+  {chapters.map((chapter, index) => {
+    const capture = recordedCaptureFor(recordedCapture, chapter.scenario);
+    return (
     <section class="wt-chapter" id={`chapter-${chapter.id}`} data-chapter={index} hidden={index !== 0} aria-labelledby={`title-${chapter.id}`}>
       <p class="wt-clock">{chapter.clock}{chapter.act && <> · {chapter.act}</>}</p>
       <h2 id={`title-${chapter.id}`}>{chapter.title}</h2>
@@ -64,16 +81,26 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
 
       {chapter.kind === 'attack' && <>
         <div class="wt-attacker"><span class="wt-tag">Ghostpaw's move</span><p><StoryText id={`${chapter.id}-atk`} text={chapter.attacker!} /></p></div>
+        {capture && <div class="wt-recorded" data-recorded-scenario={capture.run.scenario}>
+          <p><strong>Actual recorded run:</strong> <code>{capture.run.runId}</code> · {capture.run.state} · <time datetime={capture.run.startedAt}>{formatTimestamp(capture.run.startedAt, portalTimeZone)}</time>.</p>
+          <details><summary>Actual SQL execution response</summary><pre><code>{formatExecutionEvidence(capture.run)}</code></pre></details>
+        </div>}
         <div class="wt-compare">
           <article class="wt-side wt-without">
-            <span class="wt-tag">Without Defender for SQL</span>
-            <h3>{chapter.without!.headline}</h3>
+            <span class="wt-tag">Without Defender enrichment: native logs</span>
+            <h3>{capture ? 'Actual native SQL/Windows audit capture' : chapter.without!.headline}</h3>
             <p><StoryText id={`${chapter.id}-wo`} text={chapter.without!.detail} /></p>
-            <pre aria-label="Illustrative log excerpt"><code>{chapter.without!.evidence}</code></pre>
-            <p class="wt-fine">Illustrative excerpt.</p>
+            <pre aria-label={capture ? 'Captured native audit excerpts' : 'Illustrative log excerpt'}><code>{capture ? formatNativeEvidence(capture.native) : chapter.without!.evidence}</code></pre>
+            <p class="wt-fine">{capture ? 'Actual run-scoped excerpts from native auditing, not a Defender-disabled run. A session/application match is weaker than a unique run marker; forwarding and statement-level audit coverage can be incomplete.' : 'Illustrative excerpt, not captured execution evidence.'}</p>
           </article>
           <article class="wt-side wt-with">
-            <span class="wt-tag">With Defender for SQL</span>
+            <span class="wt-tag">With Defender for SQL: actual observations</span>
+            {capture && <>
+              <h3>Captured Defender response</h3>
+              <pre aria-label="Captured Defender observations"><code>{formatDefenderEvidence(capture.defender)}</code></pre>
+            </>}
+            <details open={!capture}>
+            <summary>Expected alert reference (not a captured detection)</summary>
             <div class="wt-alert">
               <div class="wt-alert-head"><span class={`wt-sev wt-sev-${chapter.with!.severity.split('/')[0].toLowerCase()}`}>{chapter.with!.severity}</span><span class="wt-alert-title">{chapter.with!.alert}</span></div>
               <dl>
@@ -83,6 +110,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
             </div>
             <p>{chapter.with!.detail}</p>
             <p class="wt-fine">Alert name, type, severity, and tactic from the <a href={alertReference} target="_blank" rel="noopener noreferrer">Microsoft alert reference</a>.</p>
+            </details>
           </article>
         </div>
         <h3>Why it matters</h3>
@@ -119,6 +147,17 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
           <thead><tr><th scope="col">Question</th><th scope="col">Without Defender for SQL</th><th scope="col">With Defender for SQL</th></tr></thead>
           <tbody>{valueComparison.map((row) => <tr><th scope="row">{row.question}</th><td>{row.without}</td><td>{row.with}</td></tr>)}</tbody>
         </table></div>
+        <p class="wt-fine">This table describes product capabilities in the fictional story, not the outcome of a captured run. Use the actual records and correlation labels above for this lab session.</p>
+
+        {externalCapture && <details class="wt-live" data-recorded-scenario="external-source">
+          <summary>Additional actual capture: external-source Security lab scenario</summary>
+          <p>Run <code>{externalCapture.run.runId}</code> · {externalCapture.run.state} · <time datetime={externalCapture.run.startedAt}>{formatTimestamp(externalCapture.run.startedAt, portalTimeZone)}</time>. This privileged test remains administrator-only in the Security lab.</p>
+          <pre><code>{formatExecutionEvidence(externalCapture.run)}</code></pre>
+          <div class="wt-compare">
+            <article class="wt-side wt-without"><h3>Actual native SQL/Windows audit</h3><pre><code>{formatNativeEvidence(externalCapture.native)}</code></pre></article>
+            <article class="wt-side wt-with"><h3>Actual Defender observations</h3><pre><code>{formatDefenderEvidence(externalCapture.defender)}</code></pre></article>
+          </div>
+        </details>}
 
         <h3>Is Pawton protected right now?</h3>
         <div class="grid">{defender.observations.map((observation) => <article class="card"><h3>{observation.label}</h3><span class="badge">{observation.state}</span><p>{observation.detail}</p></article>)}</div>
@@ -127,7 +166,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
         <ul class="wt-controls">{honestLimits.map((limit) => <li>{limit}</li>)}</ul>
 
         <h3>The case in one sentence</h3>
-        <div class="wt-callout">Every move tonight left evidence in the logs, but only Defender for SQL turned that evidence into a prioritized, explained alert while there was still time to act. Weigh the per-server plan cost on the <a href={pricingReference} target="_blank" rel="noopener noreferrer">Defender for Cloud pricing page</a> against a single missed night like this one.</div>
+        <div class="wt-callout">In the fictional story, Defender connects the dots. In this live lab, use the captured native records and actual Defender observations: an absent or uncorrelated alert is not proof of prevention, no detection, or a disabled plan. Weigh the per-server plan cost on the <a href={pricingReference} target="_blank" rel="noopener noreferrer">Defender for Cloud pricing page</a> against your protection needs.</div>
 
         <div class="actions">
           <button type="button" class="secondary" id="wt-restart">Start the story again</button>
@@ -137,7 +176,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
         </div>
       </>}
     </section>
-  ))}
+  );})}
 
   <div class="wt-nav">
     <button type="button" class="secondary" id="wt-prev">← Previous</button>
@@ -146,6 +185,7 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
   </div>
 
   <script>
+    import { formatNativeEvidence, formatDefenderEvidence, formatExecutionEvidence } from '../lib/walkthroughEvidence.mjs';
     const storageKey = 'pawton-walkthrough-step';
     const sections = [...document.querySelectorAll<HTMLElement>('.wt-chapter')];
     const steps = [...document.querySelectorAll<HTMLButtonElement>('.wt-step')];
@@ -218,8 +258,9 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
     document.addEventListener('mouseover', placeTip);
     document.addEventListener('focusin', placeTip);
 
-    type Alert = { title: string; type: string; severity: string; status: string; correlation: string; portal: string };
-    type Evidence = { state: string; alerts: Alert[]; detail: string; portal: string };
+    type Alert = { title: string; type: string; severity: string; status: string; correlation: string; correlated: boolean; portal: string; description?: string };
+    type Evidence = { checkedAt?: string; state: string; alerts: Alert[]; detail: string; portal: string };
+    type NativeEvidence = { checkedAt?: string; state: string; events: Record<string, unknown>[]; detail: string; window?: { start: string; end: string } | null };
 
     function line(parent: HTMLElement, tag: string, text: string, className?: string) {
       const element = document.createElement(tag);
@@ -229,46 +270,97 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
       return element;
     }
 
-    function renderEvidence(box: HTMLElement, evidence: Evidence, finished: boolean) {
+    function renderEvidence(box: HTMLElement, evidence: Evidence, native: NativeEvidence | undefined, finished: boolean) {
       box.querySelector('.wt-evidence')?.remove();
       const wrap = document.createElement('div');
-      wrap.className = 'wt-evidence';
+      wrap.className = 'wt-evidence wt-compare';
+      wrap.setAttribute('aria-live', 'off');
+      const raw = document.createElement('article');
+      raw.className = 'wt-side wt-without';
+      raw.dataset.evidenceSource = 'native';
+      line(raw, 'h4', 'Actual native SQL/Windows logs (no Defender enrichment)');
+      line(raw, 'pre', formatNativeEvidence(native));
+      wrap.append(raw);
+      const enriched = document.createElement('article');
+      enriched.className = 'wt-side wt-with';
+      enriched.dataset.evidenceSource = 'defender';
+      line(enriched, 'h4', 'Actual Defender observations');
       if (evidence.alerts?.length) {
-        line(wrap, 'p', 'Defender for SQL raised an alert for this activity:', 'wt-hit');
+        line(enriched, 'p', evidence.alerts.some((alert) => alert.correlated)
+          ? 'Run-correlated Defender alert records:'
+          : 'Possible related Defender alerts; attribution to this run is unconfirmed.', evidence.alerts.some((alert) => alert.correlated) ? 'wt-hit' : 'wt-fine');
         for (const alert of evidence.alerts) {
           const card = document.createElement('div');
           card.className = 'wt-alert';
           line(card, 'div', `${alert.severity} · ${alert.title}`, 'wt-alert-title');
           line(card, 'p', `${alert.type} · ${alert.status}. ${alert.correlation}`, 'wt-fine');
+          if (alert.description) line(card, 'p', alert.description);
           const link = document.createElement('a');
           link.href = alert.portal; link.target = '_blank'; link.rel = 'noopener noreferrer';
           link.textContent = 'Open in Defender for Cloud';
           card.append(link);
-          wrap.append(card);
+          enriched.append(card);
         }
       } else if (evidence.state === 'unavailable') {
-        line(wrap, 'p', `Defender evidence unavailable: ${evidence.detail}`);
+        line(enriched, 'p', `Defender evidence unavailable: ${evidence.detail}`);
       } else {
-        line(wrap, 'p', finished
-          ? 'No matching Defender alert appeared within 10 minutes. Alerts can take longer, and bounded tests may not cross every threshold. Check Defender for Cloud later.'
+        line(enriched, 'p', finished
+          ? 'The observation window ended with the actual results below. Alerts can take longer; missing results are not a prevention or protection verdict.'
           : 'Watching Defender for Cloud for a matching alert. Alerts usually take a few minutes; this checks every 30 seconds for up to 10 minutes.');
       }
+      const details = document.createElement('details');
+      line(details, 'summary', 'Actual Defender response (redacted)');
+      line(details, 'pre', formatDefenderEvidence(evidence));
+      enriched.append(details);
+      wrap.append(enriched);
       box.append(wrap);
+    }
+
+    async function checkEvidence(runId: string) {
+      const response = await fetch(`/api/walkthrough/run?runId=${encodeURIComponent(runId)}`, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(60000) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Live evidence check failed.');
+      if (!data.evidence || !data.nativeEvidence) throw new Error('The evidence response is incomplete.');
+      return data as { evidence: Evidence; nativeEvidence: NativeEvidence };
+    }
+
+    function refreshButton(box: HTMLElement, runId: string) {
+      box.querySelector('.wt-refresh-evidence')?.remove();
+      const button = line(box, 'button', 'Refresh evidence only (do not rerun)', 'wt-refresh-evidence') as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const data = await checkEvidence(runId);
+          renderEvidence(box, data.evidence, data.nativeEvidence, true);
+          box.querySelector('.wt-evidence-error')?.remove();
+        } catch (error) {
+          box.querySelector('.wt-evidence-error')?.remove();
+          line(box, 'p', error instanceof Error ? error.message : 'The evidence request failed.', 'wt-evidence-error wt-miss');
+        } finally { button.disabled = false; }
+      });
     }
 
     async function poll(box: HTMLElement, runId: string) {
       const deadline = Date.now() + 10 * 60 * 1000;
+      let latest: { evidence: Evidence; nativeEvidence: NativeEvidence } | undefined;
       while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 30000));
         try {
-          const response = await fetch(`/api/walkthrough/run?runId=${encodeURIComponent(runId)}`, { headers: { Accept: 'application/json' } });
-          const data = await response.json();
-          if (!response.ok) { line(box, 'p', data.error || 'Defender evidence check failed.'); return; }
-          renderEvidence(box, data.evidence, false);
-          if (data.evidence?.alerts?.length || data.evidence?.state === 'unavailable') return;
-        } catch { /* transient network error: keep polling */ }
+          latest = await checkEvidence(runId);
+          box.querySelector('.wt-evidence-error')?.remove();
+          renderEvidence(box, latest.evidence, latest.nativeEvidence, false);
+          const defenderDone = latest.evidence.alerts.some((alert) => alert.correlated) || latest.evidence.state === 'unavailable';
+          const nativeDone = ['observed', 'partial', 'unavailable'].includes(latest.nativeEvidence.state);
+          if (defenderDone && nativeDone) { refreshButton(box, runId); return; }
+        } catch (error) {
+          box.querySelector('.wt-evidence-error')?.remove();
+          line(box, 'p', `${error instanceof Error ? error.message : 'The evidence request failed.'} Previously captured records are retained; retrying without rerunning the scenario.`, 'wt-evidence-error wt-miss');
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(30000, Math.max(0, deadline - Date.now()))));
       }
-      renderEvidence(box, { state: 'none', alerts: [], detail: '', portal: '' }, true);
+      if (latest) renderEvidence(box, latest.evidence, latest.nativeEvidence, true);
+      else line(box, 'p', 'No evidence response was captured. No detection verdict is available.', 'wt-miss');
+      refreshButton(box, runId);
     }
 
     for (const form of document.querySelectorAll<HTMLFormElement>('.wt-run-form')) {
@@ -288,13 +380,19 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
           if (!response.ok && !run) { line(box, 'p', data.error || 'The live step failed.', 'wt-miss'); return; }
           if (!response.ok) line(box, 'p', data.error || 'The live step failed.', 'wt-miss');
           if (run) {
+            line(box, 'p', `Recorded run ${run.runId}; ${run.startedAt} to ${run.completedAt}.`, 'wt-fine');
             line(box, 'p', `What SQL Server saw: ${run.sqlProtection}`);
             if (run.comparison) {
               const c = run.comparison;
               line(box, 'p', `Legitimate lookup matched ${c.baselineMatches} order. The injected string-built query matched ${c.unsafeMatches}. The parameterized query matched ${c.parameterizedMatches}.`, 'wt-hit');
             }
             line(box, 'p', run.outcome, 'wt-fine');
-            if (run.state !== 'failed') { renderEvidence(box, { state: 'pending', alerts: [], detail: '', portal: '' }, false); await poll(box, run.runId); }
+            const execution = document.createElement('details');
+            line(execution, 'summary', 'Actual SQL execution response');
+            line(execution, 'pre', formatExecutionEvidence(run));
+            box.append(execution);
+            renderEvidence(box, { state: 'pending', alerts: [], detail: 'Not queried yet.', portal: '' }, undefined, false);
+            await poll(box, run.runId);
           }
         } catch {
           box.replaceChildren();
@@ -321,6 +419,9 @@ const planState = sqlPlan?.state === 'Standard' ? 'on' : sqlPlan?.state === 'Fre
     .wt-clock { color: var(--muted); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; margin: 0; }
     .wt-lead { font-size: 18px; }
     .wt-callout { border-left: 4px solid var(--blue); background: var(--blue-tint); padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+    .wt-capture-note, .wt-recorded { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 16px 0; background: var(--surface); }
+    .wt-capture-note h2 { font-size: 18px; margin: 0 0 8px; }
+    .wt-recorded pre { white-space: pre-wrap; word-break: break-word; }
     .wt-tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
     .wt-attacker { border: 1px dashed var(--error); border-radius: 8px; padding: 12px 16px; margin: 12px 0 18px; }
     .wt-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }

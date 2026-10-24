@@ -4,6 +4,7 @@ import {
 } from "../../../lib/walkthroughAuth.mjs";
 import { walkthroughRunnableScenarios } from "../../../lib/walkthroughStory.mjs";
 import { getRunDefenderEvidence } from "../../../lib/defenderStatus.mjs";
+import { getRunAuditEvidence } from "../../../lib/auditLog.mjs";
 import {
   sqlAttackRunner,
   SimulationError,
@@ -78,8 +79,9 @@ export async function GET({ request, cookies }) {
       },
       { status: 404, headers },
     );
-  return Response.json(
-    { run, evidence: await getRunDefenderEvidence(run) },
-    { headers },
-  );
+  const [evidence, nativeEvidence] = await Promise.all([
+    getRunDefenderEvidence(run),
+    getRunAuditEvidence(run),
+  ]);
+  return Response.json({ run, evidence, nativeEvidence }, { headers });
 }

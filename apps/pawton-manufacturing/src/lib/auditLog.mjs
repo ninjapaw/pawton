@@ -1,5 +1,6 @@
 import { DefaultAzureCredential } from "@azure/identity";
 import { defenderTarget } from "./defenderStatus.mjs";
+import { isRecordedSqlRun, redactEvidenceText } from "./walkthroughEvidence.mjs";
 import {
   LogsQueryClient,
   LogsQueryResultStatus,
@@ -253,4 +254,116 @@ export async function getRecentSaAuditEvents(
     start,
     windowEnd,
   };
+}
+
+export async function getRunAuditEvidence(
+  run,
+  { environment = process.env, client = null, now = Date.now } = {},
+) {
+  const checked = now();
+  const target = defenderTarget(environment);
+  const workspaceId = environment.LOG_ANALYTICS_WORKSPACE_ID;
+  const result = {
+    source: "Log Analytics Event / Application / MSSQLSERVER",
+    checkedAt: new Date(checked).toISOString(),
+    state: "unavailable",
+    detail: "A configured workspace, SQL VM, and valid recorded run are required.",
+    window: null,
+    truncated: false,
+    events: [],
+  };
+  if (
+    !/^[a-f0-9-]{36}$/i.test(workspaceId || "") ||
+    !target.vmId ||
+    !isRecordedSqlRun(run) ||
+    Date.parse(run.startedAt) < checked - 86400000 ||
+    Date.parse(run.completedAt) > checked + 120000
+  )
+    return result;
+  const startTime = new Date(Date.parse(run.startedAt) - 120000);
+  const endTime = new Date(Math.min(checked, Date.parse(run.completedAt) + 120000));
+  result.window = { start: startTime.toISOString(), end: endTime.toISOString() };
+  const sessionMatch =
+    run.scenario === "suspicious-app" &&
+    Number.isInteger(run.sessionId) &&
+    run.sessionId > 0 &&
+    run.sessionId <= 32767;
+  const identities = [run.marker, run.runId, run.correlationIdentity]
+    .filter((value) => typeof value === "string" && value.length > 0);
+  const matches = identities.map(
+    (value) => `RenderedDescription contains_cs ${JSON.stringify(value)}`,
+  );
+  if (sessionMatch)
+    matches.push(`(ObservedSession == ${run.sessionId} and ObservedApplication == "sqlmap")`);
+  const query = `
+    Event
+    | where TimeGenerated >= datetime(${startTime.toISOString()}) and TimeGenerated <= datetime(${endTime.toISOString()})
+    | where _ResourceId =~ ${JSON.stringify(target.vmId)}
+    | where EventLog == "Application" and Source == "MSSQLSERVER"
+    | where EventID in (33205, 18453, 18454, 18456)
+    | extend ObservedSession = toint(extract(@"(?i)(?:^|\\s)session_id:\\s*(\\d+)", 1, RenderedDescription))
+    | extend ObservedApplication = trim(@"\\s+", extract(@"(?is)(?:^|\\s)application_name:(.*?)(?:\\s+[a-z_][a-z0-9_]*:|$)", 1, RenderedDescription))
+    | where ${matches.join(" or ")}
+    | project TimeGenerated, EventID, EventLevelName, Source, EventLog, _ResourceId, RenderedDescription
+    | order by TimeGenerated asc, EventID asc, RenderedDescription asc
+    | take 26
+  `;
+  try {
+    const response = await (client ?? getClient()).queryWorkspace(
+      workspaceId,
+      query,
+      { startTime, endTime },
+      { serverTimeoutInSeconds: 15, abortSignal: AbortSignal.timeout(20000) },
+    );
+    const partial = response.status === LogsQueryResultStatus.PartialFailure;
+    if (response.status !== LogsQueryResultStatus.Success && !partial)
+      throw new Error("Unexpected Log Analytics result status.");
+    const tables = partial ? response.partialTables : response.tables;
+    const rows = tables?.[0] ? tableToObjects(tables[0]) : [];
+    result.truncated = rows.length > 25;
+    result.events = rows.filter((row) => {
+      const time = Date.parse(row.TimeGenerated);
+      const description = String(row.RenderedDescription || "");
+      return String(row._ResourceId || "").toLowerCase() === target.vmId.toLowerCase() &&
+        time >= startTime.getTime() && time <= endTime.getTime() &&
+        row.Source === "MSSQLSERVER" && row.EventLog === "Application" &&
+        [33205, 18453, 18454, 18456].includes(Number(row.EventID)) &&
+        (identities.some((identity) => description.includes(identity)) ||
+          (sessionMatch &&
+            Number(extractField(description, "session_id")) === run.sessionId &&
+            extractField(description, "application_name") === "sqlmap"));
+    }).slice(0, 25).map((row) => {
+      const parsed = parseAuditEvent(row);
+      const marked = identities.some((identity) => row.RenderedDescription.includes(identity));
+      return {
+        time: new Date(row.TimeGenerated).toISOString(),
+        eventId: Number(row.EventID),
+        action: parsed.ActionId,
+        operation: parsed.Operation,
+        success: parsed.Success,
+        application: redactEvidenceText(extractField(row.RenderedDescription, "application_name"), run),
+        database: redactEvidenceText(extractField(row.RenderedDescription, "database_name"), run),
+        correlation: marked
+          ? "Run marker or test identity matched"
+          : "SQL session, application and activity window matched; session reuse remains possible.",
+        statement: redactEvidenceText(parsed.Statement, run, 1200),
+        message: redactEvidenceText(row.RenderedDescription, run),
+      };
+    });
+    result.state = partial || result.truncated
+      ? "partial"
+      : result.events.length ? "observed" : "none-yet";
+    result.detail = partial || result.truncated
+      ? "Partial capture: the query was incomplete or reached the 25-record display limit. This is not the full audit stream."
+      : result.events.length
+        ? "Actual native SQL/Windows audit excerpts, scoped to this VM, run and event-time window. Host/principal fields, IPs and credential-like values are redacted."
+        : "No run-matching native audit records returned yet. Forwarding can be delayed, and synthetic batches need not produce statement-level audit records.";
+    return result;
+  } catch {
+    return {
+      ...result,
+      state: "unavailable",
+      detail: "Native audit logs could not be read. Check the configured workspace, Log Analytics Reader access and ingestion pipeline; no negative activity verdict is available.",
+    };
+  }
 }

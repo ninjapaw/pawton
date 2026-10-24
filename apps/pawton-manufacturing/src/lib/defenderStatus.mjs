@@ -1,4 +1,5 @@
 import { DefaultAzureCredential } from "@azure/identity";
+import { redactEvidenceText } from "./walkthroughEvidence.mjs";
 
 const credential = new DefaultAzureCredential();
 const plans = [
@@ -218,6 +219,8 @@ export async function getRunDefenderEvidence(
           severity: String(properties.severity || "Unknown"),
           status: String(properties.status || "Unknown"),
           startedAt: properties.startTimeUtc,
+          endedAt: properties.endTimeUtc,
+          description: redactEvidenceText(properties.description, run),
           correlation: correlated
             ? "Run marker or test identity matched"
             : "VM, activity window and alert family only; attribution unconfirmed. Some alert types are shared across scenarios; review the title and supporting evidence.",

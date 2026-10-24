@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": null,
+  "comparison": "Native audit logs and Defender observations from the same protected runs",
+  "defenderDisabledForComparison": false,
+  "protectionAtStart": null,
+  "protectionAtEnd": null,
+  "redactions": [
+    "Host and non-test principal fields",
+    "IP addresses",
+    "Credential-like values"
+  ],
+  "scenarios": []
+}

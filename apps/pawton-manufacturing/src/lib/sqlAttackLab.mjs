@@ -453,6 +453,14 @@ export function createSqlAttackRunner({
     if (id === "external-source") config.requestTimeout = 30000;
     const runId = randomUUID();
     const marker = `dojo-attack-test:${id}:${runId}`;
+    const correlationIdentity = id === "brute-force"
+      ? `dojo_invalid_${runId.replaceAll("-", "")}`
+      : id === "principal-anomaly"
+        ? `dojo_probe_${runId.replaceAll("-", "")}`
+        : null;
+    config.options.appName = id === "suspicious-app" ? "sqlmap" : marker;
+    const executionEvidence = { source: "SQL Server execution response" };
+    let sessionId = null;
     const source =
       id === "external-source"
         ? { sourceMode, sourceUrl: externalSourceTarget(marker, sourceMode) }
@@ -465,7 +473,9 @@ export function createSqlAttackRunner({
     try {
       let detail;
       if (id === "brute-force") {
-        const login = `dojo_invalid_${runId.replaceAll("-", "")}`;
+        const login = correlationIdentity;
+        let authenticationFailures = 0;
+        Object.assign(executionEvidence, { testIdentity: login, authenticationFailures });
         await withConnection(config, async (pool) => {
           const result = await pool
             .request()
@@ -492,18 +502,19 @@ export function createSqlAttackRunner({
             );
           } catch (error) {
             if (error.code !== "ELOGIN") throw error;
+            executionEvidence.authenticationFailures = ++authenticationFailures;
           }
         }
         detail = `Twelve authentication failures observed for ${login}. Correlate SQL login failures by this identity.`;
       } else {
-        if (id === "suspicious-app") config.options.appName = "sqlmap";
         detail = await withConnection(config, async (pool) => {
           if (["external-source", "obfuscated-shell"].includes(id)) {
             const status = await pool
               .request()
               .query(
-                "SELECT CAST(value_in_use AS int) AS enabled FROM sys.configurations WHERE name = 'xp_cmdshell'",
+                `SELECT CAST(value_in_use AS int) AS enabled FROM sys.configurations WHERE name = 'xp_cmdshell'; /* ${marker}:precheck */`,
               );
+            executionEvidence.shellEnabled = status.recordset[0]?.enabled === 1;
             if (status.recordset[0]?.enabled !== 1)
               return {
                 blocked: true,
@@ -543,6 +554,12 @@ SELECT @result AS exitCode; /* ${marker} */`
                 "Shell probe did not return its expected marker and success status.",
                 502,
               );
+            Object.assign(executionEvidence, {
+              exitCode: records.find((row) => row.exitCode === 0).exitCode,
+              stdout: records.flatMap((row) => Object.values(row))
+                .filter((value) => typeof value === "string" && value.includes(marker))
+                .slice(0, 5),
+            });
             return id === "external-source"
               ? `SQL shell downloaded the ${sourceMode === "unique" ? "UUID-hostname" : "fixed first-party"} inert canary over HTTPS, verified its SHA-256, and removed its temporary directory. No downloaded content was executed. ${sourceMode === "unique" ? "A new hostname does not guarantee that Defender considers the source unseen. " : ""}Defender detection is separate from this execution result.`
               : "SQL shell printed the test marker. No download, outbound connection, or persistence was requested.";
@@ -550,7 +567,7 @@ SELECT @result AS exitCode; /* ${marker} */`
           let statement;
           if (id === "suspicious-app")
             statement =
-              "SELECT APP_NAME() AS ApplicationName, ORIGINAL_LOGIN() AS OriginalLogin, DB_NAME() AS DatabaseName; SELECT TOP (5) SCHEMA_NAME(schema_id) AS SchemaName, name AS TableName FROM sys.tables WHERE is_ms_shipped = 0 ORDER BY schema_id, name";
+              "SELECT APP_NAME() AS ApplicationName, ORIGINAL_LOGIN() AS OriginalLogin, DB_NAME() AS DatabaseName, @@SPID AS SessionId; SELECT TOP (5) SCHEMA_NAME(schema_id) AS SchemaName, name AS TableName FROM sys.tables WHERE is_ms_shipped = 0 ORDER BY schema_id, name";
           if (id === "sql-injection") {
             if (dataMode === "lab-table")
               return runLabTableInjection(pool, marker);
@@ -584,6 +601,12 @@ SELECT @baselineMatches AS BaselineMatches, @safeMatches AS SafeMatches, @unsafe
                 "Synthetic injection comparison did not return its expected counts and quote-probe syntax error.",
                 502,
               );
+            executionEvidence.queryResult = {
+              BaselineMatches: result.recordset[0].BaselineMatches,
+              SafeMatches: result.recordset[0].SafeMatches,
+              UnsafeMatches: result.recordset[0].UnsafeMatches,
+              QuoteProbeError: result.recordset[0].QuoteProbeError,
+            };
             return {
               detail:
                 "The legitimate order lookup matched PW-1042 only. One fixed stray-quote probe produced a caught SQL syntax error. Fixed input changed the concatenated query to match all four synthetic orders across three customers; parameter binding matched zero rows. No business tables were queried or changed. This demonstrates an isolated query-construction flaw, not a vulnerability in the portal's order endpoints.",
@@ -600,7 +623,7 @@ SELECT @baselineMatches AS BaselineMatches, @safeMatches AS SafeMatches, @unsafe
             };
           }
           if (id === "principal-anomaly") {
-            const principal = `dojo_probe_${runId.replaceAll("-", "")}`;
+            const principal = correlationIdentity;
             statement = `SET XACT_ABORT ON;
 BEGIN TRANSACTION;
 BEGIN TRY
@@ -617,7 +640,22 @@ BEGIN CATCH
   THROW;
 END CATCH`;
           }
-          await pool.request().query(`/* ${marker} */\n${statement};`);
+          const observed = await pool.request().query(`/* ${marker} */\n${statement};`);
+          if (id === "suspicious-app") {
+            const metadata = observed.recordsets?.[0]?.[0] ?? observed.recordset?.[0];
+            if (metadata) {
+              if (typeof metadata.ApplicationName === "string")
+                executionEvidence.applicationName = metadata.ApplicationName;
+              if (typeof metadata.DatabaseName === "string")
+                executionEvidence.databaseName = metadata.DatabaseName;
+              if (Number.isInteger(metadata.SessionId) && metadata.SessionId > 0 && metadata.SessionId <= 32767) {
+                sessionId = metadata.SessionId;
+                executionEvidence.sessionId = sessionId;
+              }
+            }
+          } else if (Array.isArray(observed.recordset)) {
+            executionEvidence.readRows = observed.recordset.length;
+          }
           return id === "principal-anomaly"
             ? "Temporary principal created and impersonated; the read completed and all principal and grant changes were rolled back."
             : "Fixed read-only SQL test completed. No database rows were modified or returned to the browser.";
@@ -629,10 +667,9 @@ END CATCH`;
         startedAt,
         completedAt: new Date(now()).toISOString(),
         marker,
-        correlationIdentity:
-          id === "brute-force"
-            ? `dojo_invalid_${runId.replaceAll("-", "")}`
-            : null,
+        correlationIdentity,
+        ...(sessionId ? { sessionId } : {}),
+        executionEvidence,
         scenario: id,
         state: detail?.blocked ? "blocked" : "executed",
         sqlProtection: detail?.blocked
@@ -660,10 +697,9 @@ END CATCH`;
         startedAt,
         completedAt: new Date(now()).toISOString(),
         marker,
-        correlationIdentity:
-          id === "brute-force"
-            ? `dojo_invalid_${runId.replaceAll("-", "")}`
-            : null,
+        correlationIdentity,
+        ...(sessionId ? { sessionId } : {}),
+        executionEvidence,
         scenario: id,
         state: "failed",
         alertConfirmed: false,
