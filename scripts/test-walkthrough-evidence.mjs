@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { getRunAuditEvidence } from "../apps/pawton-manufacturing/src/lib/auditLog.mjs";
 import {
@@ -13,6 +15,7 @@ import {
 } from "../apps/pawton-manufacturing/src/lib/walkthroughEvidence.mjs";
 import { captureWalkthrough, validatedCaptureOrigin } from "./capture-walkthrough.mjs";
 import { SESSION_COOKIE_NAME } from "../apps/pawton-manufacturing/src/lib/adminAuth.mjs";
+import { createOperatorCapture } from "../apps/pawton-manufacturing/src/lib/operatorCapture.mjs";
 
 const vmId = "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/lab/providers/Microsoft.Compute/virtualMachines/sql";
 const environment = {
@@ -246,4 +249,110 @@ test("walkthrough shows actual recorded/live sources without fabricating an aler
   assert.equal(saved.schemaVersion, 1);
   assert.equal(saved.defenderDisabledForComparison, false);
   for (const capture of saved.scenarios) assert.equal(isRecordedSqlRun(capture.run), true);
+});
+
+async function operatorFixture(context) {
+  const directory = await mkdtemp(path.join(tmpdir(), "pawton-operator-capture-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const scenarios = ["brute-force", "suspicious-app", "sql-injection", "principal-anomaly", "external-source", "obfuscated-shell"];
+  const executions = [];
+  const notices = [];
+  const environment = new Proxy({
+    WALKTHROUGH_CAPTURE_JOB_ID: randomUUID(),
+    WEBSITE_SITE_NAME: "pawton-fixture",
+    WEBSITE_HOSTNAME: "pawton.example",
+    SQL_ATTACK_COOLDOWN_SECONDS: "1",
+  }, {
+    get(target, key) {
+      if (String(key).startsWith("ADMIN_PORTAL_"))
+        throw new Error("Operator capture must not access portal credentials.");
+      return Reflect.get(target, key);
+    },
+  });
+  return {
+    directory, executions, notices,
+    options: {
+      environment, directory, now: () => clock, pause: async () => {},
+      observationMilliseconds: 0,
+      fallback: { schemaVersion: 1, capturedAt: null, defenderDisabledForComparison: false, scenarios: [] },
+      log: (message) => notices.push(message),
+      runner: {
+        availability: async () => ({ ids: scenarios }),
+        run: async (id, options) => {
+          executions.push({ id, options });
+          return runFixture(id);
+        },
+      },
+      protection: async () => ({
+        checkedAt: new Date(clock).toISOString(),
+        observations: [{ label: "Defender for SQL on machines", state: "Standard", detail: "Subscription plan only; not proof of machine protection." }],
+      }),
+      nativeEvidence: async (run) => ({
+        checkedAt: new Date(clock).toISOString(), state: "observed", window: null,
+        events: [{ time: run.startedAt, eventId: 33205, message: run.marker }],
+      }),
+      defenderEvidence: async () => ({
+        checkedAt: new Date(clock).toISOString(), state: "none-yet",
+        detail: "No matching alert returned yet.", alerts: [], blocking: "Not confirmed.",
+      }),
+    },
+  };
+}
+
+test("management capture is opt-in, refuses invalid job IDs, and never accesses a portal credential", async (context) => {
+  const fixture = await operatorFixture(context);
+  for (const id of [undefined, "not-a-uuid"]) {
+    await createOperatorCapture({
+      ...fixture.options,
+      environment: { ...fixture.options.environment, WALKTHROUGH_CAPTURE_JOB_ID: id },
+    }).queue();
+  }
+  assert.equal(fixture.executions.length, 0);
+  assert.ok(fixture.notices.some((message) => message.includes("valid UUID")));
+  const operator = createOperatorCapture(fixture.options);
+  const first = operator.queue();
+  assert.equal(operator.queue(), first);
+  await first;
+  const capture = await operator.read();
+  assert.equal(capture.operatorJob.state, "complete");
+  assert.equal(capture.scenarios.length, 6);
+  assert.equal(capture.defenderDisabledForComparison, false);
+  assert.equal(capture.protectionAtStart.tier, "Standard");
+  assert.ok(fixture.executions.every(({ options }) => options.sourceMode === "fixed"));
+  await operator.queue();
+  assert.equal(fixture.executions.length, 6);
+});
+
+test("management capture survives deployment and a restart only re-queries recorded evidence", async (context) => {
+  const fixture = await operatorFixture(context);
+  const first = createOperatorCapture(fixture.options);
+  await first.queue();
+  const original = await first.read();
+  const restarted = createOperatorCapture(fixture.options);
+  await restarted.queue();
+  assert.equal(fixture.executions.length, 6);
+  assert.deepEqual((await restarted.read()).scenarios.map(({ run }) => run.runId),
+    original.scenarios.map(({ run }) => run.runId));
+  assert.ok(!JSON.stringify(await restarted.read()).includes("ADMIN_PORTAL_"));
+});
+
+test("management capture does not retry an interrupted execution and exposes failed protection checks", async (context) => {
+  const fixture = await operatorFixture(context);
+  const failed = createOperatorCapture({
+    ...fixture.options,
+    protection: async () => ({
+      checkedAt: new Date(clock).toISOString(),
+      observations: [{ label: "Defender for SQL on machines", state: "Free" }],
+    }),
+  });
+  await failed.queue();
+  assert.equal(fixture.executions.length, 0);
+  assert.equal((await failed.read()).operatorJob.state, "failed");
+  const checkpoint = JSON.parse(await readFile(path.join(fixture.directory, "job-state.json"), "utf8"));
+  checkpoint.inFlight = "brute-force";
+  await writeFile(path.join(fixture.directory, "job-state.json"), JSON.stringify(checkpoint));
+  const interrupted = createOperatorCapture(fixture.options);
+  await interrupted.queue();
+  assert.equal(fixture.executions.length, 0);
+  assert.match((await interrupted.read()).operatorJob.message, /interrupted/);
 });

@@ -5,11 +5,12 @@ import { getWalkthroughViewer } from '../lib/walkthroughAuth.mjs';
 import { chapters, valueComparison, honestLimits, alertReference, pricingReference, walkthroughRunnableScenarios } from '../lib/walkthroughStory.mjs';
 import { getDefenderStatus } from '../lib/defenderStatus.mjs';
 import { sqlAttackRunner } from '../lib/sqlAttackLab.mjs';
-import recordedCapture from '../data/walkthrough-capture.json';
+import { readRecordedWalkthroughCapture } from '../lib/operatorCapture.mjs';
 import { recordedCaptureFor, formatNativeEvidence, formatDefenderEvidence, formatExecutionEvidence } from '../lib/walkthroughEvidence.mjs';
 import { formatTimestamp, getPortalTimeZone } from '../lib/timeZone.mjs';
 
 const viewer = getWalkthroughViewer(Astro.cookies);
+const recordedCapture = await readRecordedWalkthroughCapture();
 Astro.response.headers.set('Cache-Control', 'no-store');
 
 const kickoff = Boolean(viewer) && Astro.url.searchParams.get('kickoff') === '1';
@@ -50,6 +51,7 @@ const captureDownload = `data:application/json;charset=utf-8,${encodeURIComponen
   <section class="wt-capture-note" aria-label="Live capture provenance">
     <h2>Real logs, not a Defender-off experiment</h2>
     <p>The comparison pairs native SQL/Windows audit logs <strong>without Defender enrichment</strong> with actual Defender observations from the <strong>same protected run</strong>. Defender is not disabled. The story clock is fictional; captured records retain their real timestamps, run IDs and query windows.</p>
+    {recordedCapture.operatorJob && <p role="status" data-capture-job-state={recordedCapture.operatorJob.state}><strong>Operator capture: {recordedCapture.operatorJob.state}.</strong> {recordedCapture.operatorJob.message}</p>}
     {recordedCapture.scenarios.length > 0 ? <>
       <p><strong>Recorded live session:</strong> <time datetime={recordedCapture.capturedAt}>{formatTimestamp(recordedCapture.capturedAt, portalTimeZone)}</time>. {recordedCapture.scenarios.length} scenario captures. Native excerpts are redacted and bounded; missing or unconfirmed alerts are reported honestly.</p>
       <a class="pill" href={captureDownload} download="pawton-walkthrough-live-capture.json">Download actual captured records (JSON)</a>

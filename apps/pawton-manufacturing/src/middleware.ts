@@ -1,7 +1,9 @@
 import { defineMiddleware } from "astro:middleware";
 import { ROBOTS_POLICY } from "./lib/pageMetadata.mjs";
+import { queueOperatorCapture } from "./lib/operatorCapture.mjs";
 
 export const onRequest = defineMiddleware(async (_context, next) => {
+  queueOperatorCapture();
   const response = await next();
   const headers = new Headers(response.headers);
   headers.set("X-Robots-Tag", ROBOTS_POLICY);
