@@ -306,7 +306,7 @@ export async function getRunAuditEvidence(
     | where ${matches.join(" or ")}
     | project TimeGenerated, EventID, EventLevelName, Source, EventLog, _ResourceId, RenderedDescription
     | order by TimeGenerated asc, EventID asc, RenderedDescription asc
-    | take 26
+    | take 101
   `;
   try {
     const response = await (client ?? getClient()).queryWorkspace(
@@ -320,7 +320,7 @@ export async function getRunAuditEvidence(
       throw new Error("Unexpected Log Analytics result status.");
     const tables = partial ? response.partialTables : response.tables;
     const rows = tables?.[0] ? tableToObjects(tables[0]) : [];
-    result.truncated = rows.length > 25;
+    result.truncated = rows.length > 100;
     result.events = rows.filter((row) => {
       const time = Date.parse(row.TimeGenerated);
       const description = String(row.RenderedDescription || "");
@@ -332,7 +332,7 @@ export async function getRunAuditEvidence(
           (sessionMatch &&
             Number(extractField(description, "session_id")) === run.sessionId &&
             extractField(description, "application_name") === "sqlmap"));
-    }).slice(0, 25).map((row) => {
+    }).slice(0, 100).map((row) => {
       const parsed = parseAuditEvent(row);
       const marked = identities.some((identity) => row.RenderedDescription.includes(identity));
       return {
@@ -354,7 +354,7 @@ export async function getRunAuditEvidence(
       ? "partial"
       : result.events.length ? "observed" : "none-yet";
     result.detail = partial || result.truncated
-      ? "Partial capture: the query was incomplete or reached the 25-record display limit. This is not the full audit stream."
+      ? "Partial capture: the query was incomplete or reached the 100-record capture limit. This is not the full audit stream."
       : result.events.length
         ? "Actual native SQL/Windows audit excerpts, scoped to this VM, run and event-time window. Host/principal fields, IPs and credential-like values are redacted."
         : "No run-matching native audit records returned yet. Forwarding can be delayed, and synthetic batches need not produce statement-level audit records.";

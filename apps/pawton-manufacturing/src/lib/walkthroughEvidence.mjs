@@ -113,7 +113,7 @@ export function createWalkthroughCapture(payload, capturedAt = new Date().toISOS
       detail: redactEvidenceText(nativeEvidence.detail, run),
       window: nativeEvidence.window,
       truncated: Boolean(nativeEvidence.truncated),
-      events: nativeEvidence.events.slice(0, 25).map((event) => ({
+      events: nativeEvidence.events.slice(0, 100).map((event) => ({
         time: event.time,
         eventId: event.eventId,
         action: event.action,
@@ -148,6 +148,27 @@ export function createWalkthroughCapture(payload, capturedAt = new Date().toISOS
   };
 }
 
+export function retainCapturedEvidence(previous, capture) {
+  if (previous?.run?.runId !== capture.run.runId) return capture;
+  const prior = createWalkthroughCapture({
+    run: previous.run, nativeEvidence: previous.native, evidence: previous.defender,
+  }, previous.capturedAt);
+  for (const [source, records] of [["native", "events"], ["defender", "alerts"]]) {
+    const latest = capture[source];
+    if (latest.state !== "unavailable" || !prior[source][records].length) continue;
+    const oldTimestamp = previous[source].lastSuccessfulCheckedAt || prior[source].checkedAt;
+    latest[records] = prior[source][records];
+    latest.lastSuccessfulCheckedAt = oldTimestamp;
+    latest.latestAttempt = { checkedAt: latest.checkedAt, state: latest.state, detail: latest.detail };
+    if (source === "native") {
+      latest.window = prior.native.window;
+      latest.truncated = prior.native.truncated;
+    }
+    latest.detail = `Latest query unavailable; retaining actual records from ${oldTimestamp}. ${latest.detail}`;
+  }
+  return capture;
+}
+
 /** @returns {ReturnType<typeof createWalkthroughCapture> | null} */
 export function recordedCaptureFor(bundle, scenario) {
   if (bundle?.schemaVersion !== 1 || !Array.isArray(bundle.scenarios))
@@ -161,6 +182,7 @@ export function formatNativeEvidence(native) {
     `Source: ${native.source || "Log Analytics Event / Application / MSSQLSERVER"}`,
     `Checked: ${native.checkedAt || "not queried"}`,
     `State: ${native.state}`,
+    native.lastSuccessfulCheckedAt ? `Retained records last successfully queried: ${native.lastSuccessfulCheckedAt}` : "",
     native.window
       ? `Event window: ${native.window.start} to ${native.window.end}`
       : "",
@@ -177,6 +199,7 @@ export function formatDefenderEvidence(defender) {
     "Source: Microsoft Defender for Cloud alerts API",
     `Checked: ${defender.checkedAt || "not queried"}`,
     `State: ${defender.state}`,
+    defender.lastSuccessfulCheckedAt ? `Retained records last successfully queried: ${defender.lastSuccessfulCheckedAt}` : "",
     defender.detail || "",
     defender.alerts?.length
       ? JSON.stringify(defender.alerts, null, 2)

@@ -237,8 +237,8 @@ a downloadable SQL template, not an execution endpoint.
 Open the self-guided story at `/walkthrough`. A fictional attacker, Ghostpaw, goes after Pawton's SQL
 Server in five acts: brute force, a known attack tool, SQL injection through the app, a
 rarely-seen principal, and an obfuscated operating-system shell. Each act shows, side by side,
-what a team *without* Defender for SQL would see (raw log lines) and the Defender for SQL alert
-that fires instead, with its official name, alert type, severity, and MITRE tactic. Dotted terms
+native audit evidence alongside actual Defender observations, with separately labeled reference
+alert names, alert types, severities, and MITRE tactics. Dotted terms
 have hover and keyboard tooltips, and a debrief compares the two outcomes, shows the live
 Defender plan status, and states plainly what Defender for SQL does *not* do: it detects and
 alerts, it doesn't block inline. To run the live acts, sign in at `/login` as the
@@ -284,11 +284,17 @@ automatically. Use `observe:<same-UUID>` to re-query a fully recorded batch with
 repeating its scenarios; an observation-only request cannot execute a new batch.
 Plain UUID values do not authorize execution. A new `run:<UUID>` explicitly requests a new batch. Job states and missing
 evidence remain visible rather than being replaced by illustrative or success-shaped results.
+Transient evidence-read failures are retried only within the bounded observation window,
+without repeating SQL activity. Previously captured records remain visible with their last
+successful query timestamp and an explicit unavailable state; a failed final read leaves the
+job partial rather than claiming a fresh or negative result.
 
 The live walkthrough and administrator evidence APIs read the SQL VM's configured Log Analytics
 workspace using the existing managed identity. Queries are bounded to the VM, execution window
 and run marker/test identity. The `sqlmap` connection keeps its required application name and
 can also be matched by its observed SQL session; that weaker match is labeled explicitly.
+Each native query captures up to 100 redacted excerpts and explicitly flags incomplete or
+capped results; this is not an export of the full audit stream.
 Ingestion may be delayed, synthetic batches need not have statement-level audit records, and
 native records are not a substitute for Defender detections.
 
