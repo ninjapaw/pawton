@@ -258,7 +258,7 @@ async function operatorFixture(context) {
   const executions = [];
   const notices = [];
   const environment = new Proxy({
-    WALKTHROUGH_CAPTURE_JOB_ID: randomUUID(),
+    WALKTHROUGH_CAPTURE_JOB_ID: `run:${randomUUID()}`,
     WEBSITE_SITE_NAME: "pawton-fixture",
     WEBSITE_HOSTNAME: "pawton.example",
     SQL_ATTACK_COOLDOWN_SECONDS: "1",
@@ -301,14 +301,14 @@ async function operatorFixture(context) {
 
 test("management capture is opt-in, refuses invalid job IDs, and never accesses a portal credential", async (context) => {
   const fixture = await operatorFixture(context);
-  for (const id of [undefined, "not-a-uuid"]) {
+  for (const id of [undefined, "not-a-uuid", randomUUID()]) {
     await createOperatorCapture({
       ...fixture.options,
       environment: { ...fixture.options.environment, WALKTHROUGH_CAPTURE_JOB_ID: id },
     }).queue();
   }
   assert.equal(fixture.executions.length, 0);
-  assert.ok(fixture.notices.some((message) => message.includes("valid UUID")));
+  assert.ok(fixture.notices.some((message) => message.includes("explicit run:<UUID>")));
   const operator = createOperatorCapture(fixture.options);
   const first = operator.queue();
   assert.equal(operator.queue(), first);
@@ -355,4 +355,19 @@ test("management capture does not retry an interrupted execution and exposes fai
   await interrupted.queue();
   assert.equal(fixture.executions.length, 0);
   assert.match((await interrupted.read()).operatorJob.message, /interrupted/);
+});
+
+test("an observation-only management request cannot execute a fresh batch", async (context) => {
+  const fixture = await operatorFixture(context);
+  const operator = createOperatorCapture({
+    ...fixture.options,
+    environment: {
+      ...fixture.options.environment,
+      WALKTHROUGH_CAPTURE_JOB_ID: `observe:${randomUUID()}`,
+    },
+  });
+  await operator.queue();
+  assert.equal(fixture.executions.length, 0);
+  assert.equal((await operator.read()).operatorJob.state, "failed");
+  assert.match((await operator.read()).operatorJob.message, /No fully recorded batch/);
 });

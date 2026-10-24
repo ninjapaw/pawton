@@ -30,6 +30,19 @@ export function createOperatorCapture({
   const statePath = directory && path.join(directory, "job-state.json");
   const capturePath = directory && path.join(directory, "latest.json");
   const timestamp = () => new Date(now()).toISOString();
+  function request() {
+    const match = /^(run|observe):(.+)$/.exec(environment.WALKTHROUGH_CAPTURE_JOB_ID || "");
+    return match && jobIdPattern.test(match[2])
+      ? { mode: match[1], id: match[2] } : null;
+  }
+  function configurationNotice(capture) {
+    return environment.WALKTHROUGH_CAPTURE_JOB_ID && !request()
+      ? {
+          ...capture,
+          operatorJob: { state: "awaiting-authorization", message: "An explicit run:<UUID> or observe:<UUID> operator request is required. No scenario is started by an unconfirmed value." },
+        }
+      : capture;
+  }
   async function readJson(file) {
     try {
       return JSON.parse(await readFile(file, "utf8"));
@@ -55,13 +68,13 @@ export function createOperatorCapture({
         Array.isArray(capture.native?.events) && Array.isArray(capture.defender?.alerts));
   }
   async function read() {
-    if (!directory) return { ...fallback, operatorJob: null };
+    if (!directory) return configurationNotice({ ...fallback, operatorJob: null });
     try {
       const saved = await readJson(capturePath);
       if (saved && !validBundle(saved)) throw new CaptureJobError("Invalid saved capture format.");
       if (saved && (!fallback.capturedAt || Date.parse(saved.capturedAt) >= Date.parse(fallback.capturedAt)))
-        return saved;
-      return { ...fallback, operatorJob: null };
+        return configurationNotice(saved);
+      return configurationNotice({ ...fallback, operatorJob: null });
     } catch {
       log("Pawton recorded capture could not be loaded; no live evidence is being substituted.");
       return {
@@ -92,7 +105,7 @@ export function createOperatorCapture({
     await save(statePath, state);
     await save(capturePath, state.bundle);
   }
-  async function run(id) {
+  async function run(id, mode) {
     let state;
     try {
       const existing = await readJson(statePath);
@@ -114,6 +127,8 @@ export function createOperatorCapture({
             scenarios: [],
           },
         };
+        if (mode === "observe")
+          throw new CaptureJobError("No fully recorded batch exists for this observation request. No scenario was started.");
         const configuredCooldown = Number(environment.SQL_ATTACK_COOLDOWN_SECONDS);
         const cooldown = Number.isInteger(configuredCooldown) && configuredCooldown >= 1 && configuredCooldown <= 3600
           ? configuredCooldown : 60;
@@ -189,15 +204,16 @@ export function createOperatorCapture({
     }
   }
   function queue() {
-    const id = environment.WALKTHROUGH_CAPTURE_JOB_ID;
-    if (!id || active || attempted.has(id)) return active;
-    if (!directory || !jobIdPattern.test(id)) {
-      attempted.add(id);
-      log("Pawton operator capture requires App Service storage and a valid UUID job ID; no activity was started.");
+    const value = environment.WALKTHROUGH_CAPTURE_JOB_ID;
+    if (!value || active || attempted.has(value)) return active;
+    const approved = request();
+    if (!directory || !approved) {
+      attempted.add(value);
+      log("Pawton operator capture requires App Service storage and an explicit run:<UUID> or observe:<UUID> request; no activity was started.");
       return;
     }
-    attempted.add(id);
-    active = run(id).finally(() => { active = undefined; });
+    attempted.add(value);
+    active = run(approved.id, approved.mode).finally(() => { active = undefined; });
     return active;
   }
   return { queue, read };

@@ -270,7 +270,7 @@ strength. An empty query or a time/family-only candidate is never presented as a
 detection or prevention.
 
 An Azure operator can also request a one-time capture **without exporting any portal
-credential**: set the Web App's `WALKTHROUGH_CAPTURE_JOB_ID` app setting to a new UUID through
+credential**: set the Web App's `WALKTHROUGH_CAPTURE_JOB_ID` app setting to `run:<new-UUID>` through
 the Azure management plane. The application reuses its existing fixed scenario runner and
 SQL/managed identities; there is no public HTTP trigger and guide permissions do not change.
 It runs the six configured scenarios once, respects their cooldown, and observes evidence for
@@ -280,8 +280,9 @@ access can activate it. Remove the setting after collection.
 Sanitized captures are retained under `/home/data/pawton-walkthrough`, outside the deployed
 site, and appear in the walkthrough and its read-only `/walkthrough-capture.json` download.
 Execution intent is checkpointed before activity: interrupted executions are never retried
-automatically. After a restart, the same job ID can re-query a fully recorded batch without
-repeating its scenarios. A new UUID explicitly requests a new batch. Job states and missing
+automatically. Use `observe:<same-UUID>` to re-query a fully recorded batch without
+repeating its scenarios; an observation-only request cannot execute a new batch.
+Plain UUID values do not authorize execution. A new `run:<UUID>` explicitly requests a new batch. Job states and missing
 evidence remain visible rather than being replaced by illustrative or success-shaped results.
 
 The live walkthrough and administrator evidence APIs read the SQL VM's configured Log Analytics
