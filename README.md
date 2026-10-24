@@ -269,6 +269,13 @@ such; captured records have their own real timestamps, run IDs, query windows an
 strength. An empty query or a time/family-only candidate is never presented as a confirmed
 detection or prevention.
 
+The recorded 2026-10-24 lab batch executed the six fixed scenarios once, at
+15:54-15:55 UTC. Its actual evidence includes native audit excerpts and a High-severity
+`SQL.VM_ShellExternalSourceAnomaly` alert correlated to the external-source run marker.
+Other scenarios retain their real query outcomes, not substituted reference alerts.
+The bundle records protection observations and distinguishes execution time from evidence
+query time; Defender was not disabled for this comparison.
+
 An Azure operator can also request a one-time capture **without exporting any portal
 credential**: set the Web App's `WALKTHROUGH_CAPTURE_JOB_ID` app setting to `run:<new-UUID>` through
 the Azure management plane. The application reuses its existing fixed scenario runner and
