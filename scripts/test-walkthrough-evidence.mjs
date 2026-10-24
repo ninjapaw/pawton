@@ -12,6 +12,7 @@ import {
   isRecordedSqlRun,
   redactEvidenceText,
   recordedCaptureFor,
+  retainCapturedEvidence,
 } from "../apps/pawton-manufacturing/src/lib/walkthroughEvidence.mjs";
 import { captureWalkthrough, validatedCaptureOrigin } from "./capture-walkthrough.mjs";
 import { SESSION_COOKIE_NAME } from "../apps/pawton-manufacturing/src/lib/adminAuth.mjs";
@@ -90,7 +91,7 @@ test("native audit queries are bounded and late arrivals retain the original eve
   assert.ok(query.includes(vmId));
   assert.ok(query.includes(run.marker));
   assert.match(query, /EventID in \(33205, 18453, 18454, 18456\)/);
-  assert.match(query, /take 26/);
+  assert.match(query, /take 101/);
   assert.doesNotMatch(query, /ingestion_time\(\)/);
   assert.equal(interval.startTime.toISOString(), "2026-10-24T11:58:00.000Z");
   assert.equal(interval.endTime.toISOString(), "2026-10-24T12:02:05.000Z");
@@ -121,8 +122,8 @@ test("empty, partial, capped and denied native queries remain distinct from a ne
   const partial = await getRunAuditEvidence(run, { environment, client: logsClient([rowFixture(run)], "PartialFailure"), now: () => clock });
   assert.equal(partial.state, "partial");
   assert.equal(partial.events.length, 1);
-  const capped = await getRunAuditEvidence(run, { environment, client: logsClient(Array.from({ length: 26 }, () => rowFixture(run))), now: () => clock });
-  assert.equal(capped.events.length, 25);
+  const capped = await getRunAuditEvidence(run, { environment, client: logsClient(Array.from({ length: 101 }, () => rowFixture(run))), now: () => clock });
+  assert.equal(capped.events.length, 100);
   assert.equal(capped.truncated, true);
   assert.equal(capped.state, "partial");
   const denied = await getRunAuditEvidence(run, {
@@ -298,6 +299,108 @@ async function operatorFixture(context) {
     },
   };
 }
+
+test("failed evidence reads retain redacted records without presenting them as fresh results", () => {
+  const run = runFixture();
+  const firstCheckedAt = new Date(clock).toISOString();
+  const original = createWalkthroughCapture({
+    run,
+    nativeEvidence: {
+      checkedAt: firstCheckedAt, state: "partial", truncated: true,
+      events: [{ time: run.startedAt, eventId: 33205, message: `${run.marker} password=private-capture-secret` }],
+    },
+    evidence: {
+      checkedAt: firstCheckedAt, state: "correlated",
+      alerts: [{ id: "recorded-alert", title: "Recorded test alert", correlated: true, description: "password=private-capture-secret" }],
+    },
+  }, firstCheckedAt);
+  function failedRead(offset) {
+    const checkedAt = new Date(clock + offset).toISOString();
+    return createWalkthroughCapture({
+      run,
+      nativeEvidence: { checkedAt, state: "unavailable", detail: "Query timed out.", events: [] },
+      evidence: { checkedAt, state: "unavailable", detail: "Query timed out.", alerts: [] },
+    }, checkedAt);
+  }
+  const retained = retainCapturedEvidence(original, failedRead(1000));
+  for (const source of ["native", "defender"]) {
+    assert.equal(retained[source].state, "unavailable");
+    assert.equal(retained[source].checkedAt, new Date(clock + 1000).toISOString());
+    assert.equal(retained[source].lastSuccessfulCheckedAt, firstCheckedAt);
+    assert.equal(retained[source].latestAttempt.state, "unavailable");
+  }
+  assert.deepEqual(retained.native.events, original.native.events);
+  assert.deepEqual(retained.defender.alerts, original.defender.alerts);
+  assert.equal(retained.native.truncated, true);
+  assert.ok(!JSON.stringify(retained).includes("private-capture-secret"));
+  assert.match(formatNativeEvidence(retained.native), /Retained records last successfully queried/);
+  assert.match(formatDefenderEvidence(retained.defender), /Retained records last successfully queried/);
+  const retried = retainCapturedEvidence(retained, failedRead(2000));
+  assert.equal(retried.native.lastSuccessfulCheckedAt, firstCheckedAt);
+  assert.equal(retried.defender.lastSuccessfulCheckedAt, firstCheckedAt);
+  const unrelated = failedRead(3000);
+  unrelated.run = runFixture();
+  assert.equal(retainCapturedEvidence(original, unrelated).native.events.length, 0);
+});
+
+test("management capture retries a transient evidence read without repeating activity", async (context) => {
+  const fixture = await operatorFixture(context);
+  let currentTime = clock;
+  let bruteReads = 0;
+  const operator = createOperatorCapture({
+    ...fixture.options,
+    now: () => currentTime,
+    pause: async (milliseconds) => { currentTime += milliseconds; },
+    observationMilliseconds: 50,
+    nativeEvidence: async (run) => {
+      if (run.scenario === "brute-force" && ++bruteReads === 1)
+        return { checkedAt: new Date(currentTime).toISOString(), state: "unavailable", events: [], detail: "Temporary read failure." };
+      return fixture.options.nativeEvidence(run);
+    },
+  });
+  await operator.queue();
+  const capture = await operator.read();
+  assert.equal(capture.operatorJob.state, "complete");
+  assert.equal(fixture.executions.length, 6);
+  assert.equal(bruteReads, 2);
+  assert.equal(capture.scenarios[0].native.state, "observed");
+  assert.ok(fixture.notices.some((message) => message.includes("retrying reads only")));
+});
+
+test("an unavailable final evidence read stays partial and retains the prior actual capture", async (context) => {
+  const fixture = await operatorFixture(context);
+  const originalOperator = createOperatorCapture(fixture.options);
+  await originalOperator.queue();
+  const original = await originalOperator.read();
+  let currentTime = clock + 10000;
+  let bruteReads = 0;
+  const observer = createOperatorCapture({
+    ...fixture.options,
+    environment: {
+      ...fixture.options.environment,
+      WALKTHROUGH_CAPTURE_JOB_ID: fixture.options.environment.WALKTHROUGH_CAPTURE_JOB_ID.replace("run:", "observe:"),
+    },
+    now: () => currentTime,
+    pause: async (milliseconds) => { currentTime += milliseconds; },
+    observationMilliseconds: 50,
+    nativeEvidence: async (run) => {
+      if (run.scenario === "brute-force") {
+        bruteReads++;
+        return { checkedAt: new Date(currentTime).toISOString(), state: "unavailable", events: [], detail: "Read remains unavailable." };
+      }
+      return fixture.options.nativeEvidence(run);
+    },
+  });
+  await observer.queue();
+  const capture = await observer.read();
+  assert.equal(capture.operatorJob.state, "partial");
+  assert.equal(fixture.executions.length, 6);
+  assert.equal(bruteReads, 2);
+  assert.equal(capture.scenarios[0].native.state, "unavailable");
+  assert.equal(capture.scenarios[0].native.lastSuccessfulCheckedAt, original.scenarios[0].native.checkedAt);
+  assert.deepEqual(capture.scenarios[0].native.events, original.scenarios[0].native.events);
+  assert.equal(capture.protectionAtEnd.tier, "Standard");
+});
 
 test("management capture is opt-in, refuses invalid job IDs, and never accesses a portal credential", async (context) => {
   const fixture = await operatorFixture(context);

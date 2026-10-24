@@ -4,7 +4,7 @@ import fallbackCapture from "../data/walkthrough-capture.json" with { type: "jso
 import { attackScenarios, sqlAttackRunner } from "./sqlAttackLab.mjs";
 import { getRunAuditEvidence } from "./auditLog.mjs";
 import { getDefenderStatus, getRunDefenderEvidence } from "./defenderStatus.mjs";
-import { createWalkthroughCapture, isRecordedSqlRun } from "./walkthroughEvidence.mjs";
+import { createWalkthroughCapture, isRecordedSqlRun, retainCapturedEvidence } from "./walkthroughEvidence.mjs";
 
 const jobIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ids = attackScenarios.map(({ id }) => id);
@@ -174,24 +174,26 @@ export function createOperatorCapture({
         for (let index = 0; index < state.runs.length; index++) {
           const record = state.runs[index];
           const [native, defender] = await Promise.all([nativeEvidence(record), defenderEvidence(record)]);
-          state.bundle.scenarios[index] = createWalkthroughCapture({
+          state.bundle.scenarios[index] = retainCapturedEvidence(state.bundle.scenarios[index], createWalkthroughCapture({
             run: record, nativeEvidence: native, evidence: defender,
-          }, timestamp());
+          }, timestamp()));
           await publish(state, "observing", "Collecting actual native audit and Defender observations. Empty and uncertain results are not negative verdicts.");
           if (native.state === "unavailable" || defender.state === "unavailable")
-            throw new CaptureJobError("An evidence source is unavailable. Recorded executions are saved; restarting the same job resumes evidence only, not activity.");
+            log("Pawton evidence read unavailable; retaining prior actual records and retrying reads only within the observation window.");
         }
         if (state.bundle.scenarios.every(({ native, defender }) =>
+          native.state !== "unavailable" && defender.state !== "unavailable" &&
           native.events.length > 0 && defender.alerts.some((alert) => alert.correlated))) break;
         if (now() >= deadline) break;
         await pause(Math.min(30000, deadline - now()));
       } while (now() <= deadline);
       state.bundle.protectionAtEnd = await observeProtection();
-      const complete = state.bundle.scenarios.every(({ native }) => native.events.length > 0);
+      const complete = state.bundle.scenarios.every(({ native, defender }) =>
+        native.events.length > 0 && native.state !== "unavailable" && defender.state !== "unavailable");
       await publish(state, complete ? "complete" : "partial",
         complete
           ? "All executions and evidence queries are recorded. Defender outcomes may still be empty or unconfirmed; capture completion is not proof of detection or prevention."
-          : "The observation window ended with missing native matches. Saved records are actual but incomplete; resume evidence only if forwarding is delayed.");
+          : "The observation window ended with missing native matches or an unavailable evidence source. Retained records are actual and timestamped; resume evidence only, never activity.");
     } catch (error) {
       const message = error instanceof CaptureJobError
         ? error.message

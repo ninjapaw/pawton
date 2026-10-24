@@ -8,6 +8,7 @@ import { SESSION_COOKIE_NAME } from "../apps/pawton-manufacturing/src/lib/adminA
 import {
   createWalkthroughCapture,
   isRecordedSqlRun,
+  retainCapturedEvidence,
 } from "../apps/pawton-manufacturing/src/lib/walkthroughEvidence.mjs";
 
 const scenarioIds = attackScenarios.map(({ id }) => id);
@@ -170,20 +171,25 @@ export async function captureWalkthrough({
         throw new Error(`Evidence lookup for ${run.scenario} failed (HTTP ${response.status}); resume the saved run IDs instead of rerunning activity.`);
       if (data.run?.runId !== run.runId || data.run?.scenario !== run.scenario)
         throw new Error("Evidence response does not match the requested recorded run.");
-      bundle.scenarios[index] = createWalkthroughCapture(data, new Date(now()).toISOString());
+      bundle.scenarios[index] = retainCapturedEvidence(bundle.scenarios[index],
+        createWalkthroughCapture(data, new Date(now()).toISOString()));
       await save();
     }
     progress(bundle.scenarios.map(({ run, native, defender }) =>
       `${run.scenario}: ${native.events.length} native record(s), ${defender.alerts.filter((alert) => alert.correlated).length} correlated Defender alert(s), states ${native.state}/${defender.state}`,
     ).join(" | "));
     if (bundle.scenarios.some(({ native, defender }) => native.state === "unavailable" || defender.state === "unavailable"))
-      throw new Error("An evidence source is unavailable. The checkpoint is saved; repair read access or configuration, then resume without rerunning scenarios.");
-    if (bundle.scenarios.every(({ native, defender }) => native.events.length > 0 && defender.alerts.some((alert) => alert.correlated))) break;
+      progress("An evidence read is unavailable; retaining prior actual records and retrying reads only within the observation window.");
+    if (bundle.scenarios.every(({ native, defender }) =>
+      native.state !== "unavailable" && defender.state !== "unavailable" &&
+      native.events.length > 0 && defender.alerts.some((alert) => alert.correlated))) break;
     if (now() >= deadline) break;
     await pause(Math.min(30000, deadline - now()));
   } while (now() <= deadline);
   bundle.protectionAtEnd = await readProtection();
   await save();
+  if (bundle.scenarios.some(({ native, defender }) => native.state === "unavailable" || defender.state === "unavailable"))
+    throw new Error("The final evidence read is unavailable. Actual retained records and timestamps are saved; resume evidence only, not activity.");
   if (bundle.protectionAtEnd.tier !== "Standard")
     throw new Error("The SQL Defender plan was not verified as Standard at the end. Review the saved observations before publishing them as protected runs.");
   return bundle;
