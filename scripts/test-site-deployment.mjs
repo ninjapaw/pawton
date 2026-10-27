@@ -31,3 +31,19 @@ test("every page links to the Pawton GitHub repository in the shared footer", as
   );
   assert.doesNotMatch(footer, /adminUsername|staffUsername|guideUsername/);
 });
+
+test("CI retains a source-bound Linux website package only after tests and build", async () => {
+  const workflow = await readFile(new URL(".github/workflows/validate-infrastructure.yml", root), "utf8");
+  const build = workflow.indexOf("npm run build --prefix apps/pawton-manufacturing");
+  const packageStep = workflow.indexOf("name: Package verified Linux website");
+  assert.ok(build >= 0 && packageStep > build);
+  assert.match(workflow, /npm prune --omit=dev --prefix apps\/pawton-manufacturing/);
+  assert.ok(workflow.includes("'.env' '.env.*' '.npmrc'"));
+  for (const path of ["package.json", "package-lock.json", "dist/server/entry.mjs", "src/layouts/Layout.astro"]) {
+    assert.ok(workflow.includes(path), `Package validation must require ${path}`);
+  }
+  assert.match(workflow, /name: pawton-site-\$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /path: \$\{\{ runner\.temp \}\}\/pawton-app\.zip/);
+  assert.match(workflow, /if-no-files-found: error/);
+  assert.match(workflow, /retention-days: 1/);
+});

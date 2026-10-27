@@ -59,6 +59,11 @@ npm ci
 npm ci --prefix apps/pawton-manufacturing
 ```
 
+The [deployment validation workflow](.github/workflows/validate-infrastructure.yml)
+retains a one-day, commit-bound Linux website ZIP after tests and build succeed.
+It includes source, the verified server build and production dependencies, but
+excludes local environment files. Packaging alone never changes Azure.
+
 The wizard is the recommended way to deploy, repair, or remove the environment.
 `main` is the only persistent source branch. The wizard defaults to the existing
 `dev` training environment; set `DEPLOY_ENVIRONMENT=prod` deliberately to select
