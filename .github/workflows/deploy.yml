@@ -34,6 +34,7 @@ concurrency:
 jobs:
   sql-scenario:
     name: SQL Server VM scenario (${{ inputs.stage }})
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       id-token: write
@@ -52,7 +53,7 @@ jobs:
 
   defender-posture:
     name: Defender posture audit
-    if: inputs.stage != 'plan' && inputs.stage != 'uninstall' && inputs.stage != 'domain'
+    if: github.ref == 'refs/heads/main' && inputs.stage != 'plan' && inputs.stage != 'uninstall' && inputs.stage != 'domain'
     needs: sql-scenario
     permissions:
       contents: read

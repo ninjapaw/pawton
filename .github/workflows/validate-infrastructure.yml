@@ -14,7 +14,7 @@ on:
       - ".github/workflows/**"
       - "azuredeploy.json"
   push:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - "infra/**"
       - "scripts/**"
@@ -38,7 +38,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ninjapaw/pawprint/.github/workflows/kit-bicep-validate.yml@3e261301bb1a70bcd25f3891117c16ebd8065ca5
+    uses: ninjapaw/pawprint/.github/workflows/kit-bicep-validate.yml@805cae1d739b7bbab1f9733d249372a4b29f66e4
     with:
       bicep-glob: "infra/**/*.bicep"
       check-committed-arm: true

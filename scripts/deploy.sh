@@ -192,7 +192,7 @@ case "$SENTINEL_MODE" in
         fail "sentinelMode must be 'new' or 'existing', got '$SENTINEL_MODE'."
         ;;
 esac
-GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'dev')"
+GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main')"
 BOOTSTRAP_SCRIPT_URL="https://raw.githubusercontent.com/ninjapaw/pawton/${GIT_BRANCH}/scripts/sql/Setup-FutonManufacturing.ps1"
 BOOTSTRAP_SCRIPT_PATH="$REPO_ROOT/scripts/sql/Setup-FutonManufacturing.ps1"
 BICEP_FILE="$AZURE_REPO_ROOT/infra/sql-defender-scenario/main.bicep"

@@ -59,9 +59,10 @@ npm ci
 npm ci --prefix apps/pawton-manufacturing
 ```
 
-The wizard is the recommended way to deploy, repair, or remove the environment. It detects
-`dev`/`prod` from the current Git branch and offers only the actions that make sense for the
-current state:
+The wizard is the recommended way to deploy, repair, or remove the environment.
+`main` is the only persistent source branch. The wizard defaults to the existing
+`dev` training environment; set `DEPLOY_ENVIRONMENT=prod` deliberately to select
+production. Switching source branches never changes the deployment target.
 
 ```bash
 npm run wizard

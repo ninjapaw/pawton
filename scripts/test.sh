@@ -47,6 +47,17 @@ bash -n "$REPO_ROOT/scripts/manage.sh"
 bash -n "$REPO_ROOT/scripts/setup-azure-github-oidc.sh"
 bash -n "$REPO_ROOT/scripts/test.sh"
 
+echo "Checking branch-independent wizard environment selection..."
+wizard_default="$(printf '8\n' | env -u DEPLOY_ENVIRONMENT bash "$REPO_ROOT/scripts/manage.sh" 2>&1)"
+[[ "$wizard_default" == *"Selected environment: dev "* ]] || { echo "ERROR: The wizard must default to dev independently of the source branch." >&2; exit 1; }
+wizard_prod="$(printf '8\n' | DEPLOY_ENVIRONMENT=prod bash "$REPO_ROOT/scripts/manage.sh" 2>&1)"
+[[ "$wizard_prod" == *"Selected environment: prod "* ]] || { echo "ERROR: The wizard must honor an explicit prod selection." >&2; exit 1; }
+if wizard_invalid="$(DEPLOY_ENVIRONMENT=invalid bash "$REPO_ROOT/scripts/manage.sh" 2>&1)"; then
+    echo "ERROR: The wizard accepted an invalid environment." >&2
+    exit 1
+fi
+[[ "$wizard_invalid" == *"DEPLOY_ENVIRONMENT must be dev or prod."* ]] || { echo "ERROR: Invalid environment selection did not explain the failure." >&2; exit 1; }
+
 echo "Checking Node.js runtime syntax..."
 (
     cd "$REPO_ROOT"

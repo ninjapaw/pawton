@@ -19,18 +19,14 @@ warn() { echo -e "${YELLOW}!${NC} $1"; }
 
 git_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""; }
 
-detect_environment() {
-    case "$(git_branch)" in
-        main) echo prod ;;
-        dev) echo dev ;;
-        *) echo dev ;;
-    esac
-}
-
-ENVIRONMENT="${DEPLOY_ENVIRONMENT:-$(detect_environment)}"
+ENVIRONMENT="${DEPLOY_ENVIRONMENT:-dev}"
+case "$ENVIRONMENT" in
+    dev|prod) ;;
+    *) printf 'DEPLOY_ENVIRONMENT must be dev or prod.\n' >&2; exit 1 ;;
+esac
 
 echo -e "${BLUE}=== Pawton — Defender for SQL / Sentinel demo wizard ===${NC}"
-echo "Detected environment: $ENVIRONMENT (branch: $(git_branch))"
+echo "Selected environment: $ENVIRONMENT (source branch: $(git_branch))"
 echo "Config file: $CONFIG_FILE"
 echo
 

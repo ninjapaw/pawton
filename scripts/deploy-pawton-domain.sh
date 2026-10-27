@@ -74,8 +74,7 @@ fi
 [[ "$ZONE_ID" =~ ^[a-fA-F0-9]{32}$ ]] || fail 'Cloudflare zone ID must be 32 hexadecimal characters.'
 if [[ "$COMMAND" == deploy ]]; then
     branch="$(git -C "$REPO_ROOT" branch --show-current)"
-    expected_branch=dev
-    [[ "$ENVIRONMENT" != prod ]] || expected_branch=main
+    expected_branch=main
     [[ "$branch" == "$expected_branch" ]] || fail "Deploy $ENVIRONMENT only from $expected_branch."
 fi
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-$(az account show --query id -o tsv)}"
